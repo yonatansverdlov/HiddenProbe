@@ -1,0 +1,30 @@
+
+# Local caches
+__pycache__/
+*.pyc
+
+# Datasets (installed by scripts/setup_data/*.sh)
+data/
+experiments/inr_classification/dataset/
+experiments/cnn_generalization/dataset/
+
+# Experiment outputs
+checkpoints/
+experiments/
+runs/
+wandb/
+results/
+logs/
+figs/
+sweeps/
+
+# Checkpoints / logs / dumps
+*.pth
+*.pt
+*.ckpt
+*.npz
+log.csv
+args.txt
+
+.vscode/
+.DS_Store
