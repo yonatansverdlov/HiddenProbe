@@ -161,6 +161,8 @@ CIFAR-10 INR classification (`scripts/HiddenProbe/classification`):
 
 - CIFAR-10 INR classification (non-augmented): `bash scripts/HiddenProbe/classification/run_cifar10_inr_nonaug.sh`
 - CIFAR-10 INR classification (augmented): `bash scripts/HiddenProbe/classification/run_cifar10_inr_aug.sh`
+- CIFAR-10 INR classification (non-augmented) over all probe counts: `bash scripts/HiddenProbe/classification/qsweep_cifar10_inr_nonaug.sh`
+- CIFAR-10 INR classification (augmented) over all probe counts: `bash scripts/HiddenProbe/classification/qsweep_cifar10_inr_aug.sh`
 
 CNN accuracy regression (`scripts/HiddenProbe/regression`):
 
@@ -197,6 +199,8 @@ CIFAR-10 INR classification (`scripts/ProbeGen/classification`):
 
 - CIFAR-10 INR classification (non-augmented): `bash scripts/ProbeGen/classification/run_cifar10_inr_nonaug.sh`
 - CIFAR-10 INR classification (augmented): `bash scripts/ProbeGen/classification/run_cifar10_inr_aug.sh`
+- CIFAR-10 INR classification (non-augmented) over all probe counts: `bash scripts/ProbeGen/classification/qsweep_cifar10_inr_nonaug.sh`
+- CIFAR-10 INR classification (augmented) over all probe counts: `bash scripts/ProbeGen/classification/qsweep_cifar10_inr_aug.sh`
 
 CNN accuracy regression (`scripts/ProbeGen/regression`):
 
