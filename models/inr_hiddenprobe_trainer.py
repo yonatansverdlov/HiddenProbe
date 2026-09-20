@@ -25,7 +25,7 @@ import argparse, math, os, sys, time, torch, torch.nn as nn, torch.nn.functional
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root — portable, no hardcoded path
 sys.path.insert(0, ROOT)   # so data.py and the models/ package import WITHOUT needing PYTHONPATH=.
 from models.lowrank import make_linear
-from models.probegen_utils import LowRankEncoderLayer
+from models.probegen_utils import LowRankEncoderLayer, find_hidden_linear_layers, run_with_linear_activation_hooks
 from models.ProbeGen import ProbeGen
 from data import INRDataset
 
@@ -75,7 +75,7 @@ ap.add_argument("--lr", type=float, default=5e-4); ap.add_argument("--epochs", t
 ap.add_argument("--batch_size", type=int, default=32); ap.add_argument("--warmup", type=int, default=300)
 ap.add_argument("--warmup_start", type=float, default=1e-5)
 ap.add_argument("--plateau_factor", type=float, default=0.2); ap.add_argument("--plateau_patience", type=int, default=6)
-ap.add_argument("--plateau_min_lr", type=float, default=1e-5); ap.add_argument("--wd", type=float, default=0.0)
+ap.add_argument("--plateau_min_lr", type=float, default=1e-5)
 ap.add_argument("--head_wd", type=float, default=0.0, help="decoupled (AdamW) weight decay on the HEAD group "
                 "only (the probe generator stays wd=0). Regularizes the readout without shrinking the probes.")
 ap.add_argument("--scheduler", choices=["plateau", "cosine", "cosine_restart"], default="plateau",
@@ -125,7 +125,7 @@ def build_probe_model():
     torch.manual_seed(0)  # same init as the frozen bank; then it LEARNS from here
     m = ProbeGen(n_tokens=NP, d_hidden=256, models_c_in=args.models_c_in, models_c_out=OUT, d_out=args.n_classes,
                  gen_type=args.gen_type, gen_latent_z=args.gen_latent_z, generator_width=args.generator_width,
-                 mixer_n_layers=6, aggregator="pat", n_hidden_target_layers=L, domain_tanh=bool(args.domain_tanh))
+                 mixer_n_layers=6, n_hidden_target_layers=L, domain_tanh=bool(args.domain_tanh))
     for p in m.parameters(): p.requires_grad_(False)          # freeze everything...
     for p in m.probe_source.parameters(): p.requires_grad_(True)  # ...except the probes we learn
     return m.to(DEV)
@@ -152,7 +152,19 @@ class AdaptiveProbes(nn.Module):
         return torch.tanh(coords) if s.tanh else coords
 
 PM = build_probe_model()
-ADAPTER = PM.pat_adapter                     # provides _capture_pre_activations (hook-based, grad-safe)
+
+
+def _capture_pre_activations(net, x):
+    """Capture hidden Linear outputs before the following SIREN activation.
+
+    This replaces the stale PATAdapter dependency that was no longer present in
+    models/ProbeGen.py. Forward hooks preserve the autograd graph, so gradients
+    still flow from the HiddenProbe loss through the frozen target INR to x and
+    therefore into the learned probe generator.
+    """
+    hidden_layers = find_hidden_linear_layers(net, expected_count=L)
+    y, acts = run_with_linear_activation_hooks(net, x, hidden_layers)
+    return acts, y
 if args.adaptive_probes:                     # replace the shared probe_source with the adaptive module
     AP = AdaptiveProbes(args.n_scout, NP - args.n_scout, args.models_c_in, L, H, OUT,
                         sum_dim=args.adapt_sum_dim, domain_tanh=bool(args.domain_tanh)).to(DEV)
@@ -182,7 +194,7 @@ def capture_batch(nets_b, x):
     """Live capture -> A[B,NP,L*H,1], f[B,NP,OUT]; keeps grad graph to x (the learned probes)."""
     Al, fl = [], []
     for net in nets_b:
-        acts, y = ADAPTER._capture_pre_activations(net, x)   # grad: loss->acts->net(x)->x->generator
+        acts, y = _capture_pre_activations(net, x)   # grad: loss->acts->net(x)->x->generator
         Al.append(torch.cat(acts, dim=-1)); fl.append(y)
     A = torch.stack(Al, 0).unsqueeze(-1)                     # [B,NP,L*H,1]
     f = torch.stack(fl, 0)                                   # [B,NP,OUT]
@@ -196,10 +208,10 @@ def capture_batch_adaptive(nets_b):
     xs = AP.scout_coords()                                   # [n_scout, c_in] shared
     Al, fl = [], []
     for net in nets_b:
-        a_s, y_s = ADAPTER._capture_pre_activations(net, xs)
+        a_s, y_s = _capture_pre_activations(net, xs)
         a_s = torch.cat(a_s, dim=-1)                         # [n_scout, L*H]
         x_a = AP.adapt_coords(a_s, y_s)                      # [n_adapt, c_in]  (this net's adaptive coords)
-        a_a, y_a = ADAPTER._capture_pre_activations(net, x_a)
+        a_a, y_a = _capture_pre_activations(net, x_a)
         a_a = torch.cat(a_a, dim=-1)                         # [n_adapt, L*H]
         Al.append(torch.cat([a_s, a_a], dim=0))             # [NP, L*H]
         fl.append(torch.cat([y_s, y_a], dim=0))             # [NP, OUT]
