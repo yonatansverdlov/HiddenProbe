@@ -18,10 +18,6 @@ from torch.utils.data import Dataset
 # Note: Dataset Code was partially inspired by: https://github.com/mkofinas/neural-graphs.git
 
 
-import csv
-from pathlib import Path
-
-
 class CIFAR10INRDataset(torch.utils.data.Dataset):
     def __init__(self, dataset_dir, split):
         self.split_dir = Path(dataset_dir) / split
