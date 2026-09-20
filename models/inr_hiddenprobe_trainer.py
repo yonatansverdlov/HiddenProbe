@@ -26,7 +26,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root 
 sys.path.insert(0, ROOT)   # so data.py and the models/ package import WITHOUT needing PYTHONPATH=.
 from models.lowrank import make_linear
 from models.probegen_utils import LowRankEncoderLayer, find_hidden_linear_layers, run_with_linear_activation_hooks
-from models.ProbeGen import ProbeGen
+from models.hiddenprobe_probe_source import ProbeGen
 from data import INRDataset
 
 NP = 128
