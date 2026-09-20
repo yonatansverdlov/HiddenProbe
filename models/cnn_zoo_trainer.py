@@ -481,15 +481,10 @@ for ep in range(start_epoch, args.epochs):
             sched.step()
         if step % args.eval_every == 0:
             vm = ev(vaN, vaY, nmax=args.val_subset)
+            tm = ev(teN, teY, nmax=args.val_subset)
             if args.scheduler == "plateau" and step >= args.warmup:
-                _lr_before = opt.param_groups[0]["lr"]
                 sched.step(vm["tau_b"])
-                _lr_after = opt.param_groups[0]["lr"]
-                if _lr_after != _lr_before:
-                    print(f"[PLATEAU] exp={args.exp_name} step={step} val_tau={vm['tau_b']:.4f} "
-                          f"LR {_lr_before:.2e} -> {_lr_after:.2e} (readout group)", flush=True)
             isb = vm["tau_b"] > best
-            tm = ev(teN, teY, nmax=args.val_subset) if isb else {"tau_b": float("nan"), "acc_mse": float("nan"), "acc_mae": float("nan")}
             if isb:
                 best = vm["tau_b"]
                 bstate = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
@@ -497,8 +492,8 @@ for ep in range(start_epoch, args.epochs):
             logrow(f"{args.exp_name},{step},{opt.param_groups[0]['lr']:.2e},{loss.item():.4f},"
                    f"{vm['tau_b']:.4f},{vm['acc_mse']*1e5:.2f},{vm['acc_mae']:.4f},"
                    f"{tm['tau_b']:.4f},{tm['acc_mse']*1e5:.2f},{tm['acc_mae']:.4f},{Q},{isb}")
-            print(f"[pgh] step={step} ({step/(time.time()-t0):.1f}/s) loss={loss.item():.3f} "
-                  f"val_tau={vm['tau_b']:.4f} val_accMSE={vm['acc_mse']*1e5:.2f} best={best:.4f} Q={Q}", flush=True)
+            suffix = " NEW_BEST" if isb else ""
+            print(f"val_tau={vm['tau_b']:.4f} test_tau={tm['tau_b']:.4f}{suffix}", flush=True)
     # end of epoch: save resume-safe training state (RNG captured HERE = just before next epoch's perm)
     save_training_state(STATE_PATH, model, opt, sched, ep + 1, step, best, bstate)
 
