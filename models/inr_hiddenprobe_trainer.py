@@ -54,8 +54,6 @@ ap.add_argument("--neuron_pool", choices=["mean", "attn"], default="mean",
 ap.add_argument("--cross_layer", type=int, default=0, help="1 = mix the L per-layer tokens with a low-rank "
                 "self-attention before the head (cross-layer structure). +~4*d*xlayer_rank params.")
 ap.add_argument("--xlayer_rank", type=int, default=32, help="rank of the cross-layer self-attention")
-ap.add_argument("--use_neuron_stats", type=int, default=0, help="1 = append 7 per-neuron distributional stats "
-                "(mean/std/max/min/mean|.|/frac>0/norm of the Q-response) to each neuron token. Probe-based, +~7*d.")
 ap.add_argument("--head", choices=["neuron_profile", "set_transformer"], default="neuron_profile",
                 help="neuron_profile (default, per-layer pool) | set_transformer (attention-through: all L*H "
                      "neuron tokens + y + CLS in one deep transformer, permutation-invariant over neurons, "
@@ -180,10 +178,10 @@ class _LowRankSelfAttn(nn.Module):   # cheap self-attention over the L layer-tok
 
 class NeuronProfileNet(nn.Module):   # neuron-profile head (probe-based; pre + post SIREN activations)
     def __init__(s, d, rank, nheads, nenc, L, out, nclass, dropout=0.0, neuron_pool="mean",
-                 cross_layer=False, xlayer_rank=32, use_neuron_stats=False):
+                 cross_layer=False, xlayer_rank=32):
         super().__init__(); s.L = L; s.neuron_pool = neuron_pool
         s.cross_layer = cross_layer
-        s.use_neuron_stats = use_neuron_stats; s.n_stats = 7 if use_neuron_stats else 0
+        s.n_stats = 7
         in_dim = 2 * NP + s.n_stats
         s.in_proj = make_linear(in_dim, d, rank=rank)
         if rank > 0:
@@ -208,10 +206,9 @@ class NeuronProfileNet(nn.Module):   # neuron-profile head (probe-based; pre + p
         for l in range(s.L):
             z = A[:, :, l, :].transpose(1, 2)             # [B,H,NP] raw pre-activations
             feats = [z, torch.sin(SIREN_W0 * z)]
-            if s.use_neuron_stats:                        # 7 per-neuron distributional stats over the Q probes
-                r = z
-                feats.append(torch.stack([r.mean(-1), r.std(-1), r.amax(-1), r.amin(-1),
-                                          r.abs().mean(-1), (r > 0).float().mean(-1), r.norm(dim=-1)], dim=-1))
+            r = z
+            feats.append(torch.stack([r.mean(-1), r.std(-1), r.amax(-1), r.amin(-1),
+                                      r.abs().mean(-1), (r > 0).float().mean(-1), r.norm(dim=-1)], dim=-1))
             z = s.in_proj(torch.cat(feats, dim=-1) if len(feats) > 1 else feats[0])
             if s.lr:
                 for lay in s.enc: z = lay(z)
@@ -228,10 +225,9 @@ class SetTransformerHead(nn.Module):
     neurons; layer identity via layer_emb, NO neuron-id) + the y token + a learned CLS, run through a deep
     joint transformer, read out once via CLS. No early pooling — the part NFT gets right. Probe-based, Q=128."""
     def __init__(s, d, nheads, nenc, L, out, nclass, dropout=0.0,
-                 use_neuron_stats=False,
                  feat_fourier=0, feat_order=0, readout="cls", pma_seeds=1):
         super().__init__(); s.L = L
-        s.use_neuron_stats = use_neuron_stats; s.n_stats = 7 if use_neuron_stats else 0
+        s.n_stats = 7
         s.feat_fourier = feat_fourier; s.feat_order = feat_order; s.readout = readout; s.pma_seeds = pma_seeds
         if feat_fourier > 0:                              # geometric multi-scale freqs centered on w0
             s.register_buffer("ffreqs", SIREN_W0 * (2.0 ** torch.linspace(-2.0, 1.0, feat_fourier)))
@@ -254,9 +250,9 @@ class SetTransformerHead(nn.Module):
         feats = [z, torch.sin(SIREN_W0 * z)]
         if s.feat_fourier > 0:                            # multi-scale Fourier (sin+cos at each freq)
             for fk in s.ffreqs: feats.append(torch.sin(fk * z)); feats.append(torch.cos(fk * z))
-        if s.use_neuron_stats:
-            r = z; feats.append(torch.stack([r.mean(-1), r.std(-1), r.amax(-1), r.amin(-1),
-                r.abs().mean(-1), (r > 0).float().mean(-1), r.norm(dim=-1)], dim=-1))
+        r = z
+        feats.append(torch.stack([r.mean(-1), r.std(-1), r.amax(-1), r.amin(-1),
+                                  r.abs().mean(-1), (r > 0).float().mean(-1), r.norm(dim=-1)], dim=-1))
         if s.feat_order > 0:                              # M quantiles of the sorted profile (perm-invariant)
             sz = torch.sort(z, dim=-1).values
             idx = torch.linspace(0, z.shape[-1] - 1, s.feat_order, device=z.device).round().long()
@@ -287,14 +283,13 @@ else:
 torch.manual_seed(args.seed)
 if args.head == "set_transformer":
     head = SetTransformerHead(args.d, args.nheads, args.nenc, L, OUT, args.n_classes, args.dropout,
-                              use_neuron_stats=bool(args.use_neuron_stats),
                               feat_fourier=args.feat_fourier, feat_order=args.feat_order,
                               readout=args.readout, pma_seeds=args.pma_seeds).to(DEV)
 else:
     head = NeuronProfileNet(args.d, args.rank, args.nheads, args.nenc, L, OUT, args.n_classes, args.dropout,
                             neuron_pool=args.neuron_pool,
                             cross_layer=bool(args.cross_layer), xlayer_rank=args.xlayer_rank,
-                            use_neuron_stats=bool(args.use_neuron_stats)).to(DEV)
+                            ).to(DEV)
 Ph = sum(p.numel() for p in head.parameters())
 print(f"[e2e] {args.exp_name} head_params={Ph:,} + learned_probe_params={n_probe_params:,} = {Ph+n_probe_params:,} "
       f"(domain_tanh={bool(args.domain_tanh)} probe_lr={args.probe_lr} "
