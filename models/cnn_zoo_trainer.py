@@ -29,8 +29,6 @@ def seed_everything(seed, deterministic=False):
     if deterministic:                       # reproducibility diagnostic: also force deterministic non-cuDNN kernels
         os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")   # must precede the first cuBLAS call
         torch.use_deterministic_algorithms(True, warn_only=True)      # warn (not fail) on ops with no deterministic impl
-    print(f"[SEED] random={seed} numpy={seed} torch={seed} cuda={seed} "
-          f"cudnn.deterministic=True cudnn.benchmark=False deterministic_algorithms={deterministic}", flush=True)
 
 
 def _rng_capture():
