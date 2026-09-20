@@ -30,6 +30,7 @@ from models.hiddenprobe_probe_source import LearnedProbeSource
 from data import INRDataset
 
 NP = 128
+SIREN_W0 = 30.0
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--dataset", default="cifar10_inr")
@@ -50,7 +51,6 @@ ap.add_argument("--dropout", type=float, default=0.0)
 ap.add_argument("--neuron_pool", choices=["mean", "attn"], default="mean",
                 help="how to pool the H neuron tokens per layer: mean (default) | attn (learned-query "
                      "attention pool, +~d params)")
-ap.add_argument("--siren_w0", type=float, default=30.0, help="SIREN w0 for the post-activation sin(w0*A) (these INRs use 30)")
 ap.add_argument("--cross_layer", type=int, default=0, help="1 = mix the L per-layer tokens with a low-rank "
                 "self-attention before the head (cross-layer structure). +~4*d*xlayer_rank params.")
 ap.add_argument("--xlayer_rank", type=int, default=32, help="rank of the cross-layer self-attention")
@@ -178,13 +178,13 @@ class _LowRankSelfAttn(nn.Module):   # cheap self-attention over the L layer-tok
         return s.o(w @ s.v(x))
 
 
-class NeuronProfileNet(nn.Module):   # neuron-profile head (probe-based; optional post-act, cross-layer)
+class NeuronProfileNet(nn.Module):   # neuron-profile head (probe-based; pre + post SIREN activations)
     def __init__(s, d, rank, nheads, nenc, L, out, nclass, dropout=0.0, neuron_pool="mean",
                  cross_layer=False, xlayer_rank=32, use_neuron_stats=False):
         super().__init__(); s.L = L; s.neuron_pool = neuron_pool
         s.cross_layer = cross_layer
         s.use_neuron_stats = use_neuron_stats; s.n_stats = 7 if use_neuron_stats else 0
-        in_dim = NP + s.n_stats
+        in_dim = 2 * NP + s.n_stats
         s.in_proj = make_linear(in_dim, d, rank=rank)
         if rank > 0:
             s.enc = nn.ModuleList([LowRankEncoderLayer(d, nheads, 4*d, rank, dropout) for _ in range(nenc)]); s.lr = True
@@ -207,7 +207,7 @@ class NeuronProfileNet(nn.Module):   # neuron-profile head (probe-based; optiona
         B = A.shape[0]; A = A[..., 0].reshape(B, NP, s.L, H); per = []
         for l in range(s.L):
             z = A[:, :, l, :].transpose(1, 2)             # [B,H,NP] raw pre-activations
-            feats = [z]
+            feats = [z, torch.sin(SIREN_W0 * z)]
             if s.use_neuron_stats:                        # 7 per-neuron distributional stats over the Q probes
                 r = z
                 feats.append(torch.stack([r.mean(-1), r.std(-1), r.amax(-1), r.amin(-1),
@@ -228,14 +228,14 @@ class SetTransformerHead(nn.Module):
     neurons; layer identity via layer_emb, NO neuron-id) + the y token + a learned CLS, run through a deep
     joint transformer, read out once via CLS. No early pooling — the part NFT gets right. Probe-based, Q=128."""
     def __init__(s, d, nheads, nenc, L, out, nclass, dropout=0.0,
-                 siren_w0=30.0, use_neuron_stats=False,
+                 use_neuron_stats=False,
                  feat_fourier=0, feat_order=0, readout="cls", pma_seeds=1):
         super().__init__(); s.L = L
         s.use_neuron_stats = use_neuron_stats; s.n_stats = 7 if use_neuron_stats else 0
         s.feat_fourier = feat_fourier; s.feat_order = feat_order; s.readout = readout; s.pma_seeds = pma_seeds
         if feat_fourier > 0:                              # geometric multi-scale freqs centered on w0
-            s.register_buffer("ffreqs", siren_w0 * (2.0 ** torch.linspace(-2.0, 1.0, feat_fourier)))
-        in_dim = NP + s.n_stats + (2 * feat_fourier * NP) + feat_order
+            s.register_buffer("ffreqs", SIREN_W0 * (2.0 ** torch.linspace(-2.0, 1.0, feat_fourier)))
+        in_dim = 2 * NP + s.n_stats + (2 * feat_fourier * NP) + feat_order
         s.in_proj = make_linear(in_dim, d)
         s.layer_emb = nn.Embedding(L, d)
         s.y_proj = make_linear(NP * out, d)
@@ -251,7 +251,7 @@ class SetTransformerHead(nn.Module):
             s.cls = nn.Parameter(torch.randn(1, 1, d) * 0.02); ro_dim = d
         s.head = nn.Sequential(make_linear(ro_dim, d), nn.ReLU(), make_linear(d, nclass))
     def _feats(s, z):                                     # z [.., NP] -> [.., in_dim]
-        feats = [z]
+        feats = [z, torch.sin(SIREN_W0 * z)]
         if s.feat_fourier > 0:                            # multi-scale Fourier (sin+cos at each freq)
             for fk in s.ffreqs: feats.append(torch.sin(fk * z)); feats.append(torch.cos(fk * z))
         if s.use_neuron_stats:
@@ -287,7 +287,6 @@ else:
 torch.manual_seed(args.seed)
 if args.head == "set_transformer":
     head = SetTransformerHead(args.d, args.nheads, args.nenc, L, OUT, args.n_classes, args.dropout,
-                              siren_w0=args.siren_w0,
                               use_neuron_stats=bool(args.use_neuron_stats),
                               feat_fourier=args.feat_fourier, feat_order=args.feat_order,
                               readout=args.readout, pma_seeds=args.pma_seeds).to(DEV)
