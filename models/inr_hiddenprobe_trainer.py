@@ -26,7 +26,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root 
 sys.path.insert(0, ROOT)   # so data.py and the models/ package import WITHOUT needing PYTHONPATH=.
 from models.lowrank import make_linear
 from models.probegen_utils import LowRankEncoderLayer, find_hidden_linear_layers, run_with_linear_activation_hooks
-from models.hiddenprobe_probe_source import ProbeGen
+from models.hiddenprobe_probe_source import LearnedProbeSource
 from data import INRDataset
 
 NP = 128
@@ -123,11 +123,14 @@ print(f"[e2e] dataset_dir={DS_DIR}  splits={SPLITS_JSON}  runs_dir={RUNS_DIR}", 
 # ---- trainable probe generator (NOT frozen, NOT cached) ----
 def build_probe_model():
     torch.manual_seed(0)  # same init as the frozen bank; then it LEARNS from here
-    m = ProbeGen(n_tokens=NP, d_hidden=256, models_c_in=args.models_c_in, models_c_out=OUT, d_out=args.n_classes,
-                 gen_type=args.gen_type, gen_latent_z=args.gen_latent_z, generator_width=args.generator_width,
-                 mixer_n_layers=6, n_hidden_target_layers=L, domain_tanh=bool(args.domain_tanh))
-    for p in m.parameters(): p.requires_grad_(False)          # freeze everything...
-    for p in m.probe_source.parameters(): p.requires_grad_(True)  # ...except the probes we learn
+    m = LearnedProbeSource(
+        n_probes=NP,
+        models_c_in=args.models_c_in,
+        gen_type=args.gen_type,
+        gen_latent_z=args.gen_latent_z,
+        generator_width=args.generator_width,
+        domain_tanh=bool(args.domain_tanh),
+    )
     return m.to(DEV)
 
 class AdaptiveProbes(nn.Module):
