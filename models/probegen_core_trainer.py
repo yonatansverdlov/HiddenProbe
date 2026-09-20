@@ -369,7 +369,7 @@ parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--num_seeds", type=int, default=1)
 
 # Canonical interface:
-#   classification: mnist, fmnist, cifar10, cifar10_aug, cifar100, cifar100_aug
+#   classification: mnist, fmnist, cifar10, cifar10_aug
 #   regression:     mnist, fmnist, svhn, cifar10_gs, cifar10_wp
 parser.add_argument(
     "--task",
@@ -381,7 +381,7 @@ parser.add_argument("--dataset", type=str, required=True)
 
 # Dataset locations are canonical and selected automatically from
 # (task, dataset). Training/sweep scripts never need to pass data paths.
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = REPO_ROOT / "data"
 
 # CIFAR INR options.
@@ -396,7 +396,10 @@ parser.add_argument(
     type=str2bool,
     default=False,
 )
-parser.add_argument("--d_hid", type=int, default=314)
+
+# Number of learned probes.
+parser.add_argument("--n_tokens", type=int, default=128)
+parser.add_argument("--d_hid", type=int, default=256)
 parser.add_argument("--mixer_n_layers", type=int, default=6)
 
 # Probe generator. If omitted, choose the natural default for the task:
