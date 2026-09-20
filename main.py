@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import runpy
 import sys
+from typing import List, Optional, Set
 
 
 CLASSIFICATION_DATASETS = {"mnist", "fmnist", "cifar10", "cifar10_aug"}
@@ -59,14 +60,14 @@ transformers (kept from hiddenprobe):
 """
 
 
-def _usage(msg: str | None = None) -> None:
+def _usage(msg: Optional[str] = None) -> None:
     if msg:
         print(f"main.py: {msg}", file=sys.stderr)
     print(USAGE, file=sys.stderr)
     raise SystemExit(2)
 
 
-def _get_flag(argv: list[str], name: str) -> str | None:
+def _get_flag(argv: List[str], name: str) -> Optional[str]:
     key = f"--{name}"
     prefix = key + "="
     for i, arg in enumerate(argv):
@@ -79,8 +80,8 @@ def _get_flag(argv: list[str], name: str) -> str | None:
     return None
 
 
-def _drop_flags(argv: list[str], names: set[str]) -> list[str]:
-    out: list[str] = []
+def _drop_flags(argv: List[str], names: Set[str]) -> List[str]:
+    out: List[str] = []
     i = 0
     keys = {f"--{name}" for name in names}
     prefixes = tuple(f"--{name}=" for name in names)
@@ -102,12 +103,12 @@ def _normalize_dataset(dataset: str) -> str:
     return _DATASET_ALIASES.get(dataset, dataset)
 
 
-def _run(module: str, argv: list[str]) -> None:
+def _run(module: str, argv: List[str]) -> None:
     sys.argv = [sys.argv[0]] + argv
     runpy.run_module(module, run_name="__main__", alter_sys=True)
 
 
-def _route_core(method: str, task: str, dataset: str, argv: list[str]) -> None:
+def _route_core(method: str, task: str, dataset: str, argv: List[str]) -> None:
     # This backend owns ALL ProbeGen runs, plus HiddenProbe MNIST/FMNIST classification.
     forwarded = _drop_flags(argv, {"method", "task", "dataset"})
     forwarded = [
@@ -118,7 +119,7 @@ def _route_core(method: str, task: str, dataset: str, argv: list[str]) -> None:
     _run("models.probegen_core_trainer", forwarded)
 
 
-def _route_hiddenprobe_cifar(dataset: str, argv: list[str]) -> None:
+def _route_hiddenprobe_cifar(dataset: str, argv: List[str]) -> None:
     # HiddenProbe CIFAR uses the NFN/NFT 2-hidden-layer SIRENs from the hiddenprobe branch.
     forwarded = _drop_flags(argv, {"method", "task", "dataset"})
 
@@ -142,7 +143,7 @@ def _route_hiddenprobe_cifar(dataset: str, argv: list[str]) -> None:
     _run("models.inr_hiddenprobe_trainer", forwarded)
 
 
-def _route_hiddenprobe_regression(dataset: str, argv: list[str]) -> None:
+def _route_hiddenprobe_regression(dataset: str, argv: List[str]) -> None:
     n_probes = _get_flag(argv, "n_probes")
     forwarded = _drop_flags(
         argv,
