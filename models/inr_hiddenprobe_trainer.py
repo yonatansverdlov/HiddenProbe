@@ -83,7 +83,6 @@ ap.add_argument("--scheduler", choices=["plateau", "cosine", "cosine_restart"], 
                      "| cosine_restart (warm restarts). Both LR groups scale together; warmup still applies first.")
 ap.add_argument("--cosine_restarts", type=int, default=1, help="number of cosine cycles for cosine_restart")
 ap.add_argument("--eval_every", type=int, default=1000); ap.add_argument("--eval_bs", type=int, default=256)
-ap.add_argument("--n_train", type=int, default=0, help="0 = all train INRs; else a seeded subset (for fast probe_lr search)")
 ap.add_argument("--seed", type=int, default=0); ap.add_argument("--exp_name", required=True)
 ap.add_argument("--ensemble_ckpts", default="", help="comma-separated best.pt paths: skip training, load each "
                 "(must match this arch), average softmax over TEST, report per-seed + ensemble accuracy, exit.")
