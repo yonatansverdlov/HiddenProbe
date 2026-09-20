@@ -27,6 +27,32 @@ require_file() {
     [[ -s "$file" ]] || die "Required file missing or empty: $file"
 }
 
+dataset_files_ready() {
+    local name="$1"
+    local target="$2"
+    shift 2
+
+    log "Checking whether $name dataset is already fully installed..."
+
+    if [[ ! -d "$target" ]]; then
+        log "$name target directory does not exist yet: $target"
+        return 1
+    fi
+
+    local req
+    for req in "$@"; do
+        if [[ ! -s "$target/$req" ]]; then
+            log "$name is not ready yet; missing or empty: $target/$req"
+            return 1
+        fi
+        log "Found required dataset file: $target/$req"
+    done
+
+    log "$name dataset already exists at: $target"
+    log "Skipping download and extraction."
+    return 0
+}
+
 download_url() {
     local url="$1"
     local dest="$2"
@@ -105,6 +131,47 @@ extract_zip_with_progress() {
     '
 
     unzip -o "$archive" -d "$dest" 2>&1 \
+        | awk -v total="$total" -v label="$label" "$awk_program"
+}
+
+extract_tar_xz_with_progress() {
+    local archive="$1"
+    local dest="$2"
+    local label="${3:-tar.xz extraction}"
+
+    require_cmd tar
+
+    local total
+    total="$(tar -tJf "$archive" 2>/dev/null | wc -l | tr -d '[:space:]')"
+
+    if [[ -z "$total" || "$total" -le 0 ]]; then
+        log "Could not count tar entries; extracting normally."
+        tar -xJf "$archive" -C "$dest"
+        return
+    fi
+
+    log "$label: $total entries"
+
+    local awk_program='
+        BEGIN { width=40; count=0; last=-1 }
+        {
+            count++
+            pct=int((count*100)/total)
+            if (pct>100) pct=100
+            if (pct != last) {
+                filled=int(width*pct/100)
+                bar=""
+                for (i=0; i<filled; i++) bar=bar "#"
+                for (i=filled; i<width; i++) bar=bar "-"
+                printf "\r[setup] %s: [%s] %3d%% (%d/%d)", label, bar, pct, count, total > "/dev/stderr"
+                fflush("/dev/stderr")
+                last=pct
+            }
+        }
+        END { printf "\n" > "/dev/stderr"; fflush("/dev/stderr") }
+    '
+
+    tar -xJvf "$archive" -C "$dest" 2>&1 \
         | awk -v total="$total" -v label="$label" "$awk_program"
 }
 
