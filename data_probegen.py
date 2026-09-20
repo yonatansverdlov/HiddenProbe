@@ -1,18 +1,12 @@
-import ast
 import json
 import os
-import random
 import re
 from pathlib import Path
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
-from safetensors.torch import safe_open, load_model
-from transformers import ResNetConfig, ResNetForImageClassification
 
 import csv
-from torch.utils.data import Dataset
 
 # Note: Dataset Code was partially inspired by: https://github.com/mkofinas/neural-graphs.git
 
@@ -482,83 +476,6 @@ class Generic_CNN_Network(nn.Module):
         x = self.flatten(x)
         x = self.fc(x)
         return x
-
-
-class NFNZooDataset(torch.utils.data.Dataset):
-    def __init__(self, data_path, split, idcs_file=None):
-        data = np.load(os.path.join(data_path, "weights.npy"))
-        # Hardcoded shuffle order for consistent test set.
-        shuffled_idcs = pd.read_csv(idcs_file, header=None).values.flatten()
-        data = data[shuffled_idcs]
-        metrics = pd.read_csv(
-            os.path.join(data_path, "metrics.csv.gz"), compression="gzip"
-        )
-        metrics['generalization'] = metrics['test_accuracy'] - metrics['train_accuracy']
-        metrics = metrics.iloc[shuffled_idcs]
-        self.layout = pd.read_csv(os.path.join(data_path, "layout.csv"))
-        # filter to final-stage weights ("step" == 86 in metrics)
-        isfinal = metrics["step"] == 86
-        metrics = metrics[isfinal]
-        data = data[isfinal]
-        assert np.isfinite(data).all()
-
-        metrics.index = np.arange(0, len(metrics))
-        idcs = self._split_indices_iid(data)[split]
-        data = data[idcs]
-        self.metrics = metrics.iloc[idcs]
-        self.metrics['sample_id'] = np.arange(len(self.metrics))
-        self.metrics['chosen_label'] = self.metrics['test_accuracy']
-        self.weights, self.biases = [], []
-        for i, row in self.layout.iterrows():
-            arr = data[:, row["start_idx"]: row["end_idx"]]
-            bs = arr.shape[0]
-            arr = arr.reshape((bs, *eval(row["shape"])))
-            if row["varname"].endswith("kernel:0"):
-                # tf to pytorch ordering
-                if arr.ndim == 5:
-                    arr = arr.transpose(0, 4, 3, 1, 2)
-                elif arr.ndim == 3:
-                    arr = arr.transpose(0, 2, 1)
-                self.weights.append(arr)
-            elif row["varname"].endswith("bias:0"):
-                self.biases.append(arr)
-            else:
-                raise ValueError(f"varname {row['varname']} not recognized.")
-
-        self.model_config = {}
-        self.model_config['n_layers'] = 3
-        self.model_config['strides'] = [2, 2, 2]
-        self.model_config['kernel_sizes'] = [(3, 3), (3, 3), (3, 3)]
-        self.model_config['channels'] = [1, 16, 16, 16]
-        self.model_config['paddings'] = [1, 1, 1]
-
-    def _split_indices_iid(self, data):
-        splits = {}
-        test_split_point = int(0.5 * len(data))
-        splits["test"] = list(range(test_split_point, len(data)))
-
-        trainval_idcs = list(range(test_split_point))
-        val_point = int(0.8 * len(trainval_idcs))
-        # use local seed to ensure consistent train/val split
-        rng = random.Random(0)
-        rng.shuffle(trainval_idcs)
-        splits["train"] = trainval_idcs[:val_point]
-        splits["val"] = trainval_idcs[val_point:]
-        return splits
-
-    def __len__(self):
-        return self.weights[0].shape[0]
-
-    def __getitem__(self, idx):
-        weights = [torch.from_numpy(w[idx]) for w in self.weights]
-        biases = [torch.from_numpy(b[idx]) for b in self.biases]
-
-        activations = [self.metrics.iloc[idx]["config.activation"]] * 3
-        model = Generic_CNN_Network(**self.model_config, activations=activations, out_size=10)
-        model.load_weights(weights, biases)
-
-        score = self.metrics.iloc[idx]['chosen_label']
-        return model, score
 
 
 class CNN_Park_ModelData(torch.utils.data.Dataset):
