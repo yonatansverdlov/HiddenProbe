@@ -433,6 +433,12 @@ parser.add_argument("--rank", type=int, default=8)
 # Optimization
 parser.add_argument("--batch_size", type=int, default=32)
 parser.add_argument("--lr", type=float, default=3e-4)
+parser.add_argument(
+    "--probe_lr",
+    type=float,
+    default=None,
+    help="Learning rate for the trainable probe source. Default: same as --lr.",
+)
 parser.add_argument("--weight_decay", type=float, default=0.0)
 parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--eval_every", type=int, default=500)
@@ -456,6 +462,12 @@ parser.add_argument("--plateau_patience", type=int, default=3)
 parser.add_argument("--plateau_min_lr", type=float, default=1e-6)
 
 args = parser.parse_args()
+
+# Historically the canonical trainer used one Adam group, so probe parameters
+# always had exactly the same LR as the rest of the model. Keep that behavior
+# as the default while exposing it explicitly for reproducible sweeps.
+if args.probe_lr is None:
+    args.probe_lr = args.lr
 
 # The method selects the model semantics in this backend. ProbeGen is always
 # output-only. HiddenProbe is supported here only for MNIST/FMNIST classification
@@ -947,6 +959,7 @@ def run_one_seed(args, seed, exp_dir):
         "batch_size": args.batch_size,
         "lr": args.lr,
         "weight_decay": args.weight_decay,
+        "probe_lr": args.probe_lr,
         "epochs": args.epochs,
         "scheduler": args.scheduler,
         "plateau_monitor": args.plateau_monitor,
@@ -1047,10 +1060,23 @@ def run_one_seed(args, seed, exp_dir):
             "gt": np.asarray(gt),
         }
 
+    probe_params = list(model.probe_source.parameters())
+    probe_param_ids = {id(p) for p in probe_params}
+    main_params = [p for p in model.parameters() if id(p) not in probe_param_ids]
+
     optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=args.lr,
-        weight_decay=args.weight_decay,
+        [
+            {
+                "params": main_params,
+                "lr": args.lr,
+                "weight_decay": args.weight_decay,
+            },
+            {
+                "params": probe_params,
+                "lr": args.probe_lr,
+                "weight_decay": args.weight_decay,
+            },
+        ]
     )
 
     if args.scheduler == "cosine":
