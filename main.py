@@ -143,8 +143,20 @@ def _route_hiddenprobe_cifar(dataset: str, argv: list[str]) -> None:
 
 
 def _route_hiddenprobe_regression(dataset: str, argv: list[str]) -> None:
-    forwarded = _drop_flags(argv, {"method", "task", "dataset", "zoo"})
-    forwarded += ["--zoo", _REGRESSION_ZOO[dataset]]
+    n_probes = _get_flag(argv, "n_probes")
+    forwarded = _drop_flags(
+        argv,
+        {"method", "task", "dataset", "zoo", "hidden_mode", "n_probes"},
+    )
+    forwarded += [
+        "--zoo", _REGRESSION_ZOO[dataset],
+        "--hidden_mode", "on",
+    ]
+
+    # Unified public name: --n_probes. The legacy regression backend calls this
+    # n_out_probes; in shared-probe mode it is also the hidden-probe count.
+    if n_probes is not None:
+        forwarded += ["--n_out_probes", n_probes]
 
     # Grayscale SmallCNN zoos use one input channel; Wild Park uses RGB.
     if dataset != "cifar10_wp" and _get_flag(forwarded, "models_c_in") is None:
