@@ -9,7 +9,7 @@ DATASET_DIR="$TARGET/dataset"
 ARCHIVE="$DOWNLOAD_DIR/fmnist_inrs.zip"
 SPLIT="$TARGET/fmnist_splits.json"
 
-ARCHIVE_URL="https://www.dropbox.com/sh/56pakaxe58z29mq/AABrctdu2U65jGYr2WQRzmMna/fmnist_inrs.zip?dl=1"
+ARCHIVE_URL="https://www.dropbox.com/sh/56pakaxe58z29mq/AAAssoHq719OmSHSKKTiKKHGa/fmnist_inrs.zip?dl=1"
 SPLIT_URL="https://raw.githubusercontent.com/jonkahana/ProbeGen/main/experiments/inr_classification/dataset/fmnist_splits.json"
 
 log "============================================================"
