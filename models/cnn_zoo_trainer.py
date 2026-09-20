@@ -482,30 +482,24 @@ for ep in range(start_epoch, args.epochs):
 torch.save({k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
            os.path.join(args.out_dir, "final.pt"))
 fv = ev(vaN, vaY)                                            # ALWAYS eval final-epoch VAL (cheap, uniform metric)
-print(f"[FINAL-VAL] {args.exp_name} final_val_tau={fv['tau_b']:.4f} final_val_mse={fv['acc_mse']*1e5:.2f} "
-      f"final_val_mae={fv['acc_mae']:.4f}", flush=True)
+
 if bstate is not None:                                       # load best-val checkpoint (== best.pt on disk)
     model.load_state_dict({k: v.to(DEV) for k, v in bstate.items()})
 ff = ft = None; diag = {}
 if args.skip_test_eval:                                      # TUNING MODE: no test eval, no diagnostics, no dump
-    print(f"[FINAL] {args.exp_name} best_val_tau={best:.4f} | TEST SKIPPED (tuning_mode) "
-          f"| queries={Q} params={rep['total_trainable']:,}", flush=True)
+
     args.dump_preds = ""                                     # ensure no test preds are written in tuning mode
 else:
     ff = ev(teN, teY)                                        # final-epoch checkpoint, full test
     ft = ev(teN, teY)                                        # best-val checkpoint, full test (reported)
-    print(f"[FINAL-EPOCH] {args.exp_name} TEST tau={ff['tau_b']:.4f} accMSE={ff['acc_mse']*1e5:.2f} accMAE={ff['acc_mae']:.4f}", flush=True)
-    print(f"[FINAL] {args.exp_name} best_val_tau={best:.4f} | TEST tau={ft['tau_b']:.4f} "
-          f"accMSE={ft['acc_mse']*1e5:.2f} accMSEx1e5={ft['acc_mse']*1e5:.2f} accMAE={ft['acc_mae']:.4f} "
-          f"| queries={Q} params={rep['total_trainable']:,}", flush=True)
+
+
     diag = {"tau_full": ft["tau_b"], "mse_full": ft["acc_mse"]}
     if args.hidden_mode == "on":
         z = ev(teN, teY, zero_hidden=True); s = ev(teN, teY, shuffle_hidden=True)
         diag.update(tau_hidden_zero=z["tau_b"], tau_hidden_shuffle=s["tau_b"],
                     hidden_zero_drop=ft["tau_b"] - z["tau_b"], hidden_shuffle_drop=ft["tau_b"] - s["tau_b"])
-        print(f"[DIAG] {args.exp_name} tau_full={ft['tau_b']:.4f} tau_hidden_zero={z['tau_b']:.4f} "
-              f"tau_hidden_shuffle={s['tau_b']:.4f} | zero_drop={diag['hidden_zero_drop']:+.4f} "
-              f"shuffle_drop={diag['hidden_shuffle_drop']:+.4f} (positive => hidden IS used)", flush=True)
+
 if args.dump_preds:                                          # Stage-3: per-example preds + positive-affine cal
     @torch.no_grad()
     def _pe(nets):
@@ -521,8 +515,7 @@ if args.dump_preds:                                          # Stage-3: per-exam
     diag.update(cal_affine_a=_a, cal_affine_b=_b,
                 cal_val_mse=float(np.mean((_a * _vp + _b - _vt) ** 2)) * 1e5, cal_val_mae=float(np.mean(np.abs(_a * _vp + _b - _vt))),
                 cal_test_mse=float(np.mean((_a * _tp + _b - _tt) ** 2)) * 1e5, cal_test_mae=float(np.mean(np.abs(_a * _tp + _b - _tt))))
-    print(f"[CAL] {args.exp_name} a={_a:.3f} b={_b:.4f} val_mse {fv['acc_mse']*1e5:.1f}->{diag['cal_val_mse']:.1f} "
-          f"test_mse {ft['acc_mse']*1e5:.1f}->{diag['cal_test_mse']:.1f}", flush=True)
+
 # ---- validation trajectory (step, val_tau, lr) read back from log.csv for summary.json ----
 _vtraj = []
 try:
