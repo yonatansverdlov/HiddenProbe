@@ -500,11 +500,12 @@ if args.dataset not in allowed_datasets:
     )
 
 if args.gen_type is None:
-    args.gen_type = (
-        "linear_2_no_acts"
-        if args.task == "classification"
-        else "deep_linear_6"
-    )
+    if args.task == "classification":
+        args.gen_type = "linear_2_no_acts"
+    elif args.dataset == "cifar10_wp":
+        args.gen_type = "deep_linear_5"
+    else:
+        args.gen_type = "deep_linear_6"
 
 if args.plateau_monitor is None:
     args.plateau_monitor = (
