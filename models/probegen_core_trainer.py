@@ -19,7 +19,7 @@ from data_probegen import CIFAR10INRDataset, INRDataset, CNN_Park_ModelData
 
 
 # Canonical tasks/datasets:
-#   Classification: mnist, fmnist, cifar10, cifar10_aug, cifar100, cifar100_aug
+#   Classification: mnist, fmnist, cifar10, cifar10_aug
 #   Regression:     mnist, fmnist, svhn, cifar10_gs, cifar10_wp
 
 # =============================================================================
@@ -384,13 +384,7 @@ parser.add_argument("--dataset", type=str, required=True)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = REPO_ROOT / "data"
 
-# CIFAR INR options.
-parser.add_argument(
-    "--cifar_extra_aug",
-    type=int,
-    default=10,
-    help="Additional INR realizations for *_aug classification tasks.",
-)
+# CIFAR INR cache option. The cifar10_aug dataset itself fixes extra_aug=10.
 parser.add_argument(
     "--cifar_cache_models",
     type=str2bool,
@@ -398,7 +392,7 @@ parser.add_argument(
 )
 
 # Number of learned probes.
-parser.add_argument("--n_tokens", type=int, default=128)
+parser.add_argument("--n_probes", type=int, default=128)
 parser.add_argument("--d_hid", type=int, default=256)
 parser.add_argument("--mixer_n_layers", type=int, default=6)
 
@@ -439,7 +433,7 @@ parser.add_argument("--rank", type=int, default=8)
 # Optimization
 parser.add_argument("--batch_size", type=int, default=32)
 parser.add_argument("--lr", type=float, default=3e-4)
-parser.add_argument("--wd", type=float, default=0.0)
+parser.add_argument("--weight_decay", type=float, default=0.0)
 parser.add_argument("--epochs", type=int, default=20)
 parser.add_argument("--eval_every", type=int, default=500)
 parser.add_argument("--n_workers", type=int, default=0)
@@ -769,7 +763,7 @@ def build_datasets(args):
         num_classes = int(cfg["num_classes"])
         is_augmented = bool(cfg["augmented"])
         dataset_name = "CIFAR-100" if num_classes == 100 else "CIFAR-10"
-        effective_extra_aug = args.cifar_extra_aug if is_augmented else 0
+        effective_extra_aug = 10 if is_augmented else 0
 
         common_kwargs = {
             "dataset_dir": data_dir,
@@ -887,7 +881,7 @@ def run_one_seed(args, seed, exp_dir):
     print(
         "Model config: "
         f"gen_type={args.gen_type}, "
-        f"n_tokens={args.n_tokens}, "
+        f"n_probes={args.n_probes}, "
         f"d_hid={args.d_hid}, "
         f"generator_width={args.generator_width}, "
         f"include_hidden_features={args.include_hidden_features}, "
@@ -895,7 +889,7 @@ def run_one_seed(args, seed, exp_dir):
     )
 
     model = ProbeGen(
-        n_tokens=args.n_tokens,
+        n_tokens=args.n_probes,
         d_hidden=args.d_hid,
         models_c_in=ds["models_c_in"],
         models_c_out=ds["models_c_out"],
@@ -937,7 +931,7 @@ def run_one_seed(args, seed, exp_dir):
         "dataset": args.dataset,
         "task": task,
         "selection_metric": "val_tau" if task == "regression" else "val_acc",
-        "n_tokens": args.n_tokens,
+        "n_probes": args.n_probes,
         "d_hid": args.d_hid,
         "mixer_n_layers": args.mixer_n_layers,
         "gen_type": args.gen_type,
@@ -951,7 +945,7 @@ def run_one_seed(args, seed, exp_dir):
         "d_out": ds["d_out"],
         "batch_size": args.batch_size,
         "lr": args.lr,
-        "wd": args.wd,
+        "weight_decay": args.weight_decay,
         "epochs": args.epochs,
         "scheduler": args.scheduler,
         "plateau_monitor": args.plateau_monitor,
@@ -1055,7 +1049,7 @@ def run_one_seed(args, seed, exp_dir):
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=args.lr,
-        weight_decay=args.wd,
+        weight_decay=args.weight_decay,
     )
 
     if args.scheduler == "cosine":
