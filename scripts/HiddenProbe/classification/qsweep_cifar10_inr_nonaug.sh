@@ -17,11 +17,12 @@ run() {
 
 for Q in 16 32 64 128 256; do
   # set-transformer head width / depth, learning rates, input features and schedule per probe count
+  EPOCHS=30                       # every probe count trains 30 epochs except the adopted 128-probe schedule (60)
   case "$Q" in
     16)  D=104; NENC=2; LR=2e-4; PROBE_LR=2e-3; FEAT=(); SCHED=(--scheduler plateau --plateau_factor 0.5 --plateau_patience 5 --plateau_min_lr 1e-6) ;;
     32)  D=104; NENC=2; LR=4e-4; PROBE_LR=4e-3; FEAT=(); SCHED=(--scheduler plateau --plateau_factor 0.7 --plateau_patience 3 --plateau_min_lr 1e-6) ;;
     64)  D=88; NENC=3; LR=4e-4; PROBE_LR=4e-3; FEAT=(); SCHED=(--scheduler plateau --plateau_factor 0.5 --plateau_patience 3 --plateau_min_lr 1e-6) ;;
-    128)  D=120; NENC=2; LR=2e-4; PROBE_LR=2e-3; FEAT=(); SCHED=(--scheduler plateau --plateau_factor 0.5 --plateau_patience 3 --plateau_min_lr 1e-6) ;;
+    128)  D=120; NENC=2; LR=2e-4; PROBE_LR=2e-3; FEAT=(); SCHED=(--scheduler plateau --plateau_factor 0.5 --plateau_patience 3 --plateau_min_lr 1e-6); EPOCHS=60 ;;
     256)  D=128; NENC=2; LR=2e-4; PROBE_LR=2e-3; FEAT=(); SCHED=(--scheduler plateau --plateau_factor 0.7 --plateau_patience 3 --plateau_min_lr 1e-6) ;;
   esac
   EXP_NAME="hiddenprobe_cifar10_inr_nonaug_Q${Q}_s${SEED}"
@@ -34,6 +35,6 @@ for Q in 16 32 64 128 256; do
     --use_post_act 1 --siren_w0 30 --use_neuron_stats 1 --ema_decay 0.999 ${FEAT[@]+"${FEAT[@]}"} \
     --lr "$LR" --probe_lr "$PROBE_LR" --batch_size 32 --warmup 300 --dropout 0.1 --head_wd 0.1 \
     "${SCHED[@]}" \
-    --epochs 30 --eval_every 500 --n_train 0 --seed "$SEED" \
+    --epochs "$EPOCHS" --eval_every 500 --n_train 0 --seed "$SEED" \
     --runs_dir "checkpoints/cifar10_inr_nonaug" --exp_name "$EXP_NAME"
 done

@@ -19,5 +19,5 @@ python main.py inr --method hiddenprobe \
   --use_post_act 1 --siren_w0 30 --use_neuron_stats 1 --ema_decay 0.999 \
   --lr 2e-4 --probe_lr 2e-3 --batch_size 32 --warmup 300 --dropout 0.1 --head_wd 0.1 \
   --scheduler plateau --plateau_factor 0.5 --plateau_patience 3 --plateau_min_lr 1e-6 \
-  --epochs 30 --eval_every 500 --n_train 0 --seed "$SEED" \
+  --epochs 60 --eval_every 500 --n_train 0 --seed "$SEED" \
   --runs_dir "checkpoints/cifar10_inr_nonaug" --exp_name "hiddenprobe_cifar10_inr_nonaug_Q${Q}_s${SEED}"
