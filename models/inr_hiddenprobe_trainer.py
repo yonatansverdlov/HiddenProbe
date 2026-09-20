@@ -19,7 +19,7 @@ Usage (reproduce-then-learn on CIFAR-10, head fixed at the 0.57 winner):
     --L 4 --H 32 --out_dim 3 --n_classes 10 --models_c_in 2 \
     --d 128 --nenc 2 --lr 5e-4 --probe_lr 1e-2 --domain_tanh 1 \
     --plateau_factor 0.2 --plateau_patience 6 --plateau_min_lr 1e-5 \
-    --batch_size 32 --warmup 300 --epochs 50 --eval_every 1000 --n_train 0 --exp_name e2e_cifar
+    --batch_size 32 --warmup 300 --epochs 50 --eval_every 1000 --exp_name e2e_cifar
 """
 import argparse, math, os, sys, time, torch, torch.nn as nn, torch.nn.functional as F
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root — portable, no hardcoded path
@@ -99,15 +99,6 @@ ap.add_argument("--readout", default="cls", choices=["cls", "pma", "multi"], hel
                 "'multi' = concat[CLS, mean-pool, max-pool] (widens the single-token readout bottleneck).")
 ap.add_argument("--pma_seeds", type=int, default=1, help="readout=pma: number of learned pooling seed queries "
                 "(K); readout is K*d wide -> less information bottleneck than a single CLS/PMA vector.")
-ap.add_argument("--label_smoothing", type=float, default=0.0, help="cross-entropy label smoothing (e.g. 0.1); "
-                "soft targets, does NOT change the task/metric — a generalization regularizer targeting the val->test gap.")
-ap.add_argument("--adaptive_probes", type=int, default=0, help="ADAPTIVE PROBES: Q=n_probes = n_scout FIXED + "
-                "(n_probes-n_scout) PER-INR coords generated from a summary of the scout readings. Still Q=128.")
-ap.add_argument("--n_scout", type=int, default=32, help="adaptive_probes: # fixed scout probes (rest are adaptive).")
-ap.add_argument("--adapt_sum_dim", type=int, default=128, help="adaptive_probes: INR-summary embedding width.")
-ap.add_argument("--early_stop_patience", type=int, default=0, help="stop training when val_acc has not improved "
-                "for this many consecutive evals (0=off). With generous --epochs this makes each run/Q stop at its "
-                "OWN peak -> budget-independent, and bounds the val-overfit that degrades best-val selection late.")
 args = ap.parse_args()
 NP = args.n_probes   # override the module default (128) with the CLI value
 DEV = "cuda"; L, H, OUT = args.L, args.H, args.out_dim
@@ -133,27 +124,6 @@ def build_probe_model():
     )
     return m.to(DEV)
 
-class AdaptiveProbes(nn.Module):
-    """Q = n_scout FIXED (shared) probes + n_adapt PER-INR probes whose coords are generated from a
-    summary of THIS INR's scout readings. Total unique coords = n_scout+n_adapt = NP, so Q is preserved.
-    Still probe-based (no weight reading); each adaptive coord carries INR-specific information.
-    Differentiable end-to-end: loss -> adaptive acts -> adapt coords -> summary -> scout acts -> scout coords."""
-    def __init__(s, n_scout, n_adapt, c_in, Lc, Hc, out, sum_dim=128, domain_tanh=True):
-        super().__init__()
-        s.n_scout = n_scout; s.n_adapt = n_adapt; s.c_in = c_in; s.tanh = domain_tanh
-        s.scout = nn.Parameter(torch.randn(n_scout, c_in) * 0.5)              # learned fixed scout coords
-        prof = Lc * Hc + out                                                  # per scout probe: pre-acts + output
-        s.summary = nn.Sequential(nn.Linear(prof, sum_dim), nn.ReLU(),
-                                  nn.Linear(sum_dim, sum_dim), nn.ReLU())
-        s.gen = nn.Linear(sum_dim, n_adapt * c_in)                            # INR summary -> adaptive coords
-        nn.init.zeros_(s.gen.bias)
-    def scout_coords(s):
-        return torch.tanh(s.scout) if s.tanh else s.scout                    # [n_scout, c_in]
-    def adapt_coords(s, scout_acts, scout_y):                                # [n_scout, L*H], [n_scout, out]
-        emb = s.summary(torch.cat([scout_acts, scout_y], dim=-1)).mean(dim=0)  # pool over scouts -> [sum_dim]
-        coords = s.gen(emb).view(s.n_adapt, s.c_in)
-        return torch.tanh(coords) if s.tanh else coords
-
 PM = build_probe_model()
 
 
@@ -168,21 +138,13 @@ def _capture_pre_activations(net, x):
     hidden_layers = find_hidden_linear_layers(net, expected_count=L)
     y, acts = run_with_linear_activation_hooks(net, x, hidden_layers)
     return acts, y
-if args.adaptive_probes:                     # replace the shared probe_source with the adaptive module
-    AP = AdaptiveProbes(args.n_scout, NP - args.n_scout, args.models_c_in, L, H, OUT,
-                        sum_dim=args.adapt_sum_dim, domain_tanh=bool(args.domain_tanh)).to(DEV)
-    PROBE_MOD = AP
-else:
-    AP = None; PROBE_MOD = PM.probe_source
+PROBE_MOD = PM.probe_source
 n_probe_params = sum(p.numel() for p in PROBE_MOD.parameters() if p.requires_grad)
 
 
 def load_split(split):
     ds = INRDataset(dataset_dir=DS_DIR, splits_path=SPLITS_JSON, split=split)
     idx = list(range(len(ds)))
-    if split == "train" and args.n_train > 0 and args.n_train < len(idx):
-        g = torch.Generator().manual_seed(args.seed)
-        idx = torch.randperm(len(ds), generator=g)[:args.n_train].tolist()
     nets, ys, t0 = [], [], time.time()
     for j, i in enumerate(idx):
         net, label = ds[i]
@@ -204,28 +166,7 @@ def capture_batch(nets_b, x):
     return A, f
 
 
-def capture_batch_adaptive(nets_b):
-    """Adaptive: read each net at the shared scout coords, generate that net's adaptive coords from the
-    scout readings, read again there, concat -> A[B,NP,L*H,1], f[B,NP,OUT]. Two hooked forwards/net;
-    total unique coords per net = n_scout+n_adapt = NP. Grad flows through both reads and the summary."""
-    xs = AP.scout_coords()                                   # [n_scout, c_in] shared
-    Al, fl = [], []
-    for net in nets_b:
-        a_s, y_s = _capture_pre_activations(net, xs)
-        a_s = torch.cat(a_s, dim=-1)                         # [n_scout, L*H]
-        x_a = AP.adapt_coords(a_s, y_s)                      # [n_adapt, c_in]  (this net's adaptive coords)
-        a_a, y_a = _capture_pre_activations(net, x_a)
-        a_a = torch.cat(a_a, dim=-1)                         # [n_adapt, L*H]
-        Al.append(torch.cat([a_s, a_a], dim=0))             # [NP, L*H]
-        fl.append(torch.cat([y_s, y_a], dim=0))             # [NP, OUT]
-    A = torch.stack(Al, 0).unsqueeze(-1)                     # [B,NP,L*H,1]
-    f = torch.stack(fl, 0)                                   # [B,NP,OUT]
-    return A, f
-
-
-def feats(nets_b):                                          # unified capture: adaptive or shared probes
-    if AP is not None:
-        return capture_batch_adaptive(nets_b)
+def feats(nets_b):
     return capture_batch(nets_b, PM.generate_probes())
 
 
@@ -433,9 +374,7 @@ def log(r):
         fp.write(r + "\n")
 
 N = len(trN); step = 0; best = 0.0; t0 = time.time(); best_state = None
-evals_since_best = 0; stop = False                        # early-stopping bookkeeping
 for ep in range(args.epochs):
-    if stop: break
     perm = torch.randperm(N)
     for bi in range(0, N, args.batch_size):
         idx = perm[bi:bi+args.batch_size].tolist()
@@ -455,7 +394,7 @@ for ep in range(args.epochs):
         opt.zero_grad()
         with torch.autocast("cuda", dtype=torch.bfloat16):
             A, f = feats(nets_b); out = head(A, f)
-            loss = F.cross_entropy(out, yb, label_smoothing=args.label_smoothing)
+            loss = F.cross_entropy(out, yb)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(list(head.parameters()) +
                                        [p for p in PROBE_MOD.parameters() if p.requires_grad], 1.0)
@@ -466,19 +405,14 @@ for ep in range(args.epochs):
             if args.scheduler == "plateau" and step >= args.warmup: sched.step(va)
             isb = va > best
             if isb:
-                best = va; evals_since_best = 0
+                best = va
                 src_h = ema["head"] if ema is not None else head.state_dict()   # save the EMA snapshot when on
                 src_p = ema["probe_source"] if ema is not None else PROBE_MOD.state_dict()
                 best_state = {"head": {k: v.detach().cpu().clone() for k, v in src_h.items()},
                               "probe_source": {k: v.detach().cpu().clone() for k, v in src_p.items()}}
                 torch.save(best_state, os.path.join(EXP, "best.pt"))
-            else:
-                evals_since_best += 1
             log(f"{args.exp_name},{ep},{step},{opt.param_groups[0]['lr']:.2e},{opt.param_groups[1]['lr']:.2e},{loss.item():.4f},{va:.4f},{te:.4f},{isb}")
             print(f"[e2e] step={step} ({step/(time.time()-t0):.2f}/s) loss={loss.item():.3f} val={va:.4f} test={te:.4f} best={best:.4f}", flush=True)
-            if args.early_stop_patience > 0 and evals_since_best >= args.early_stop_patience:
-                print(f"[e2e] early-stop: val flat for {evals_since_best} evals (best_val={best:.4f}) at step={step}", flush=True)
-                stop = True; break
 if best_state is not None:
     head.load_state_dict({k: v.to(DEV) for k, v in best_state["head"].items()})
     PROBE_MOD.load_state_dict({k: v.to(DEV) for k, v in best_state["probe_source"].items()})
