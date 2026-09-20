@@ -405,5 +405,15 @@ if best_state is not None:
     head.load_state_dict({k: v.to(DEV) for k, v in best_state["head"].items()})
     PROBE_MOD.load_state_dict({k: v.to(DEV) for k, v in best_state["probe_source"].items()})
 fva = ev(vaN, vaY, swap_ema=False); fte = ev(teN, teY, swap_ema=False)   # best_state already holds the EMA snapshot
-print(f"[FINAL] {args.exp_name} params={Ph+n_probe_params:,} best_val={best:.4f} val={fva:.4f} test={fte:.4f}", flush=True)
 log(f"FINAL,{args.epochs},{step},,,,{fva:.4f},{fte:.4f},best")
+json.dump(
+    {
+        "exp": args.exp_name,
+        "seed": args.seed,
+        "best_val_acc": best,
+        "best_test_acc": fte,
+        "final_val_acc": fva,
+    },
+    open(os.path.join(EXP, "summary.json"), "w"),
+    indent=2,
+)
