@@ -215,7 +215,6 @@ if args.dataset_name:
             print(f"[DATASET] FAIL exp={args.exp_name}: dataset_name=SVHN but --splits={args.splits} is a "
                   f"CIFAR/Wild-Park path — refusing to run (leakage guard).", flush=True)
             raise SystemExit(4)
-    else:
 
 seed_everything(args.seed, deterministic=bool(args.deterministic))
 DEV = args.device
