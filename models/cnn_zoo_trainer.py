@@ -205,8 +205,6 @@ if args.assert_canonical:
     if _viol:
         print(f"[PROTOCOL-ASSERT] FAIL exp={args.exp_name}: " + "; ".join(_viol), flush=True)
         raise SystemExit(2)
-    print(f"[PROTOCOL-ASSERT] PASS exp={args.exp_name} model=pgh target_space=raw probe_sharing=shared "
-          f"probe_source=build_probe_source({args.gen_type})", flush=True)
 
 if args.dataset_name:
     # Leakage guard only applies to the wp loader (splits/zip). zoo=svhn_gs bypasses the WP loader
@@ -217,10 +215,7 @@ if args.dataset_name:
             print(f"[DATASET] FAIL exp={args.exp_name}: dataset_name=SVHN but --splits={args.splits} is a "
                   f"CIFAR/Wild-Park path — refusing to run (leakage guard).", flush=True)
             raise SystemExit(4)
-        print(f"[DATASET] dataset={args.dataset_name} splits={os.path.basename(args.splits)} "
-              f"zip={os.path.basename(args.zip) if args.zip else '(default)'}", flush=True)
     else:
-        print(f"[DATASET] dataset={args.dataset_name} zoo={args.zoo} (wp splits/zip bypassed)", flush=True)
 
 seed_everything(args.seed, deterministic=bool(args.deterministic))
 DEV = args.device
@@ -250,8 +245,6 @@ if args.zoo in _SMALLCNN_ZOOS:
     _ddir, _dsplit = _SMALLCNN_ZOOS[args.zoo]
     _ddir = args.zoo_data_dir or _ddir
     _dsplit = args.zoo_split or _dsplit
-    print(f"[DATASET] zoo={args.zoo} data_dir={_ddir} split={_dsplit} activation={args.activation} "
-          f"(Unterthiner SmallCNN zoo; NO INR/CIFAR-WP weights)", flush=True)
     trN, trY = load_svhn_cnns("train", args.activation, DEV, data_dir=_ddir, split_csv=_dsplit, limit=args.n_train)
     vaN, vaY = load_svhn_cnns("val", args.activation, DEV, data_dir=_ddir, split_csv=_dsplit, limit=args.val_limit)
     teN, teY = load_svhn_cnns("test", args.activation, DEV, data_dir=_ddir, split_csv=_dsplit, limit=args.test_limit)
@@ -294,29 +287,7 @@ if args.probe_dropout > 0.0:
           f"{args.n_out_probes}; default-0 path is bit-identical to pre-dropout).", flush=True)
 
 rep = model.param_report()
-print(f"[PARAMS] exp={args.exp_name} mode={args.hidden_mode} preset={args.adapter_preset} "
-      f"P_out={args.n_out_probes} P_hidden={args.n_hidden_probes} | "
-      + " ".join(f"{k}={v:,}" for k, v in rep.items() if not k.startswith("queries_")), flush=True)
 _q = model.n_target_queries()
-print(f"[QUERIES] exp={args.exp_name} probe_sharing={_q['probe_sharing']} "
-      f"output_probe_count={_q['out_probes']} hidden_probe_count={_q['hidden_probes']} "
-      f"unique_query_count={_q['unique_query_count']} target_forward_input_count={_q['target_forward_input_count']}", flush=True)
-print(f"[PROTOCOL] exp={args.exp_name} target_space={args.target_space} scheduler={args.scheduler} "
-      f"warmup={args.warmup} grad_clip={args.grad_clip} rank_loss_w={args.rank_loss_w} "
-      f"lr={args.lr} probe_lr={args.probe_lr} epochs={args.epochs} bs={args.batch_size}", flush=True)
-from models.lr_dipt_lowrank import count_params as _cp
-print(f"[PROBES] type={args.gen_type} Q={args.n_out_probes} latent_dim={model.gen_latent_z} "
-      f"generator_params={_cp(model.probe_source.generator)} latent_params={model.probe_source.input.numel()} "
-      f"trainable_generator={all(p.requires_grad for p in model.probe_source.generator.parameters())} "
-      f"trainable_latents={model.probe_source.input.requires_grad} unique_query_count={_q['unique_query_count']} "
-      f"latent_init_std={model.probe_source.input.std().item():.3f} probe_source=build_probe_source({args.gen_type})", flush=True)
-print(f"[RECORD] model=pgh Q={args.n_out_probes} target_space={args.target_space} probe_type={args.gen_type} "
-      f"latent_dim={model.gen_latent_z} latent_init_std={model.probe_source.input.std().item():.3f} "
-      f"unique_query_count={_q['unique_query_count']} lr={args.lr} probe_lr={args.probe_lr} "
-      f"scheduler={args.scheduler} batch_size={args.batch_size} rank_loss={args.rank_loss_w} "
-      f"warmup={args.warmup} grad_clip={args.grad_clip} "
-      f"capacity[adapter_preset={args.adapter_preset} hidden_dim={preset.get('hidden_dim')} "
-      f"interaction_rank={args.interaction_rank} mixer_hidden={args.mixer_hidden}]", flush=True)
 
 # ---- optim: probe source (latents+generator) @ probe_lr vs readout @ lr -------------------------
 # For canonical Kahana, set probe_lr=lr=3e-4 -> ALL params (latents, generator, readout) get one lr.
@@ -334,16 +305,10 @@ if args.hidden_lr > 0:                 # 3-group SEPARATED optimizer
               {"params": hid_params, "lr": args.hidden_lr},
               {"params": probe_params, "lr": args.probe_lr}]
     _base_lrs = (args.lr, args.hidden_lr, args.probe_lr)
-    print(f"[OPTIM] SEPARATED | group0(output/kahana) lr={args.lr} n={len(out_params)} | "
-          f"group1(hidden-branch) lr={args.hidden_lr} n={len(hid_params)} | "
-          f"group2(probe_source) lr={args.probe_lr} n={len(probe_params)}", flush=True)
 else:                                  # 2-group (backward compatible: readout = out+hidden @ --lr)
     groups = [{"params": out_params + hid_params, "lr": args.lr, "weight_decay": args.weight_decay},
               {"params": probe_params, "lr": args.probe_lr}]
     _base_lrs = (args.lr, args.probe_lr)
-    print(f"[OPTIM] group0(readout=output+hidden) lr={args.lr} wd={args.weight_decay} n={len(out_params)+len(hid_params)} | "
-          f"group1(probe_source=latents+generator) lr={args.probe_lr} n={len(probe_params)} | "
-          f"all_one_lr={args.lr == args.probe_lr}", flush=True)
 opt = torch.optim.Adam(groups)
 import math as _math
 _steps_per_epoch = _math.ceil(len(trN) / args.batch_size)
@@ -351,9 +316,9 @@ _total_steps = args.epochs * _steps_per_epoch
 _sched_epochs = args.sched_total_epochs or args.epochs               # cosine horizon (>= --epochs for early-stop+resume)
 _sched_total_steps = _sched_epochs * _steps_per_epoch
 _planned_evals = _total_steps // max(1, args.eval_every)             # periodic (mid-training) evals
-print(f"[EVALPLAN] exp={args.exp_name} total_steps={_total_steps} steps_per_epoch={_steps_per_epoch} "
-      f"eval_every={args.eval_every} planned_periodic_evals={_planned_evals} "
-      f"(+1 guaranteed final-epoch val)", flush=True)
+print(f"dataset={args.dataset_name or args.zoo} seed={args.seed} n_probes={args.n_out_probes}", flush=True)
+print(f"train={len(trN)} val={len(vaN)} test={len(teN)}", flush=True)
+print(f"epochs={args.epochs} batch_size={args.batch_size} total_steps={_total_steps} eval_every={args.eval_every}", flush=True)
 if _planned_evals < 6 and not args.allow_sparse_eval and not args.eval_only_ckpt:
     print(f"[EVALPLAN] ABORT exp={args.exp_name}: planned_periodic_evals={_planned_evals} < 6 "
           f"(eval_every={args.eval_every} vs total_steps={_total_steps}). This is the Round-1 bug: a short job "
@@ -362,8 +327,6 @@ if _planned_evals < 6 and not args.allow_sparse_eval and not args.eval_only_ckpt
     raise SystemExit(3)
 if args.scheduler == "cosine":                                        # Kahana official: step every batch
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=max(1, _sched_total_steps - args.warmup))
-    print(f"[SCHED] cosine T_max={_sched_total_steps - args.warmup} (horizon {_sched_epochs} epochs; "
-          f"run stops at --epochs {args.epochs})", flush=True)
 else:                                                                 # plateau: step on val tau at eval
     if args.probe_min_lr >= 0:
         # per-group min_lr: probe group (ALWAYS the last optimizer group) floored at --probe_min_lr so its
@@ -372,8 +335,6 @@ else:                                                                 # plateau:
         _min_lrs = [args.plateau_min_lr] * (len(groups) - 1) + [args.probe_min_lr]
         sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", factor=args.plateau_factor,
                                                            patience=args.plateau_patience, min_lr=_min_lrs)
-        print(f"[SCHED] plateau per-group min_lr={_min_lrs} (readout floor={args.plateau_min_lr}, "
-              f"probe floor={args.probe_min_lr}); base lrs={_base_lrs}", flush=True)
     else:
         sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode="max", factor=args.plateau_factor,
                                                            patience=args.plateau_patience, min_lr=args.plateau_min_lr)
