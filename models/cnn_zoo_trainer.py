@@ -432,7 +432,7 @@ if args.eval_only_ckpt:                                       # SALVAGE / pred-d
               open(os.path.join(args.out_dir, "summary.json"), "w"), indent=2)
     raise SystemExit(0)
 
-N = len(trN); step = 0; best = -1.0; t0 = time.time(); bstate = None; start_epoch = 0
+N = len(trN); step = 0; best = -1.0; bstate = None; start_epoch = 0
 if args.resume_training_state:
     rs = torch.load(args.resume_training_state, map_location=DEV)
     model.load_state_dict({k: v.to(DEV) for k, v in rs["model"].items()})
@@ -453,6 +453,20 @@ if args.eval_at_init and not args.resume_training_state:
            f"{vm0['acc_mse']*1e5:.2f},{vm0['acc_mae']:.4f},nan,nan,nan,{Q},True")
     print(f"[INIT-EVAL] {args.exp_name} step=0 val_tau={vm0['tau_b']:.4f} -> seeded as best-val floor "
           f"(the init stays eligible as the historical best checkpoint).", flush=True)
+
+_timing_start_step = step
+_t0 = time.time()
+
+def _fmt_duration(seconds):
+    seconds = max(0, int(round(seconds)))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h{m:02d}m{s:02d}s"
+    if m:
+        return f"{m}m{s:02d}s"
+    return f"{s}s"
+
 for ep in range(start_epoch, args.epochs):
     perm = torch.randperm(N)
     for bi in range(0, N, args.batch_size):
@@ -493,9 +507,14 @@ for ep in range(start_epoch, args.epochs):
                    f"{vm['tau_b']:.4f},{vm['acc_mse']*1e5:.2f},{vm['acc_mae']:.4f},"
                    f"{tm['tau_b']:.4f},{tm['acc_mse']*1e5:.2f},{tm['acc_mae']:.4f},{Q},{isb}")
             suffix = " NEW_BEST" if isb else ""
+            elapsed = time.time() - _t0
+            steps_done_this_run = max(1, step - _timing_start_step)
+            sec_per_step = elapsed / steps_done_this_run
+            eta = sec_per_step * max(0, _total_steps - step)
             print(
                 f"step={step} epoch={ep} val_tau={vm['tau_b']:.4f} "
-                f"test_tau={tm['tau_b']:.4f}{suffix}",
+                f"test_tau={tm['tau_b']:.4f} elapsed={_fmt_duration(elapsed)} "
+                f"eta={_fmt_duration(eta)}{suffix}",
                 flush=True,
             )
     # end of epoch: save resume-safe training state (RNG captured HERE = just before next epoch's perm)
