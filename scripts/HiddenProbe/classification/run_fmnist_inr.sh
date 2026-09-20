@@ -33,6 +33,7 @@ python main.py \
     --plateau_factor 0.2 \
     --plateau_min_lr 1e-6 \
     --lr 7e-4 \
+    --probe_lr 7e-4 \
     --weight_decay 0.0 \
     --eval_every 500 \
     --n_workers 0 \
