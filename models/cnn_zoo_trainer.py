@@ -493,7 +493,11 @@ for ep in range(start_epoch, args.epochs):
                    f"{vm['tau_b']:.4f},{vm['acc_mse']*1e5:.2f},{vm['acc_mae']:.4f},"
                    f"{tm['tau_b']:.4f},{tm['acc_mse']*1e5:.2f},{tm['acc_mae']:.4f},{Q},{isb}")
             suffix = " NEW_BEST" if isb else ""
-            print(f"val_tau={vm['tau_b']:.4f} test_tau={tm['tau_b']:.4f}{suffix}", flush=True)
+            print(
+                f"step={step} epoch={ep} val_tau={vm['tau_b']:.4f} "
+                f"test_tau={tm['tau_b']:.4f}{suffix}",
+                flush=True,
+            )
     # end of epoch: save resume-safe training state (RNG captured HERE = just before next epoch's perm)
     save_training_state(STATE_PATH, model, opt, sched, ep + 1, step, best, bstate)
 
