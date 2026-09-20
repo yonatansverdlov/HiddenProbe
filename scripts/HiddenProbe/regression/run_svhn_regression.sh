@@ -7,8 +7,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 cd "$REPO_ROOT"
 
-# Install/verify the SVHN zoo first.
-bash scripts/setup_data/regression_svhn.sh
 
 MAIN_PY="${MAIN_PY:-main.py}"
 DATA_ROOT="${DATA_ROOT:-$REPO_ROOT/data}"
