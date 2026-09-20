@@ -471,8 +471,8 @@ for ep in range(start_epoch, args.epochs):
             eta = sec_per_step * max(0, _total_steps - step)
             print(
                 f"step={step} epoch={ep} val_tau={vm['tau_b']:.4f} "
-                f"test_tau={tm['tau_b']:.4f} elapsed={_fmt_duration(elapsed)} "
-                f"eta={_fmt_duration(eta)}{suffix}",
+                f"test_tau={tm['tau_b']:.4f} time_elapsed={_fmt_duration(elapsed)} "
+                f"time_remaining={_fmt_duration(eta)}{suffix}",
                 flush=True,
             )
     # end of epoch: save resume-safe training state (RNG captured HERE = just before next epoch's perm)
