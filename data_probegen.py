@@ -11,12 +11,8 @@ import csv
 # Note: Dataset Code was partially inspired by: https://github.com/mkofinas/neural-graphs.git
 
 
-import csv
-from pathlib import Path
-
-
 class CIFAR10INRDataset(torch.utils.data.Dataset):
-    """CIFAR-10/CIFAR-100 SIREN dataset in the NFN/NFT directory format.
+    """CIFAR-10 SIREN dataset in the NFN/NFT directory format.
 
     Expected directory structure (under ``dataset_dir``)::
 
