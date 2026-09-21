@@ -16,6 +16,11 @@ for ((SEED=0; SEED<NUM_SEEDS; SEED++)); do
   EXP_NAME="hiddenprobe_cifar10_inr_nonaug_Q${Q}_s${SEED}"
   SUMMARY="$RUNS_DIR/$EXP_NAME/summary.json"
 
+  python "$SCRIPT_DIR/recover_cifar_summary.py" \
+    --run_dir "$RUNS_DIR/$EXP_NAME" \
+    --exp_name "$EXP_NAME" \
+    --seed "$SEED"
+
   if [[ ! -s "$SUMMARY" ]]; then
     python main.py \
       --method hiddenprobe \
