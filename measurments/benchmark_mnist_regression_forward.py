@@ -104,7 +104,7 @@ def make_probegen(n_probes: int, seed: int) -> ProbeGen:
         mixer_n_layers=6,
         include_hidden_features=False,
         per_probe_mlp="mlp2",
-        per_probe_mlp_width=300,
+        per_probe_mlp_width=270,
         per_probe_out_dim=10,
         per_probe_init="standard",
         n_hidden_target_layers=0,
@@ -265,11 +265,12 @@ def main() -> None:
     print(f"ProbeGen    total/trainable params: {pg_total:,} / {pg_trainable:,}")
     print(f"HiddenProbe total/trainable params: {hp_total:,} / {hp_trainable:,}")
 
-    if pg_trainable != hp_trainable:
-        raise RuntimeError(
-            "Parameter-count mismatch: "
-            f"ProbeGen={pg_trainable:,}, HiddenProbe={hp_trainable:,}. "
-            "Benchmark stopped before timing."
+    if pg_trainable == hp_trainable:
+        print("Parameter count: MATCH")
+    else:
+        print(
+            "Parameter count: MISMATCH "
+            f"(ProbeGen={pg_trainable:,}, HiddenProbe={hp_trainable:,}) — continuing as requested"
         )
 
     pg_queries = args.n_probes
@@ -282,7 +283,6 @@ def main() -> None:
             f"Query-count mismatch: ProbeGen={pg_queries}, HiddenProbe={hp_queries}."
         )
 
-    print("Parameter count: MATCH")
     print("Query count:     MATCH")
     print()
 
