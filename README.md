@@ -3,7 +3,7 @@
 HiddenProbe learns representations of neural networks by evaluating learned probes on a frozen target network and using responses from its hidden layers for downstream prediction. This repository contains the implementation and experiment scripts for INR classification and model accuracy prediction.
 
 <p align="center">
-  <img src="assets/hiddenprobe_overview.png" width="95%" alt="HiddenProbe overview">
+  <img src="figs/hiddenprobe_overview.png" width="95%" alt="HiddenProbe overview">
 </p>
 
 ## Installation
