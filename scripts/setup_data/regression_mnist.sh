@@ -7,8 +7,10 @@ NAME="MNIST"
 TARGET="$DATA_ROOT/regression/mnist"
 ARCHIVE="$DOWNLOAD_DIR/mnist.tar.xz"
 ARCHIVE_URL="https://storage.googleapis.com/gresearch/smallcnnzoo-dataset/mnist.tar.xz"
-SPLIT_SRC="$SCRIPT_DIR/splits/gs_splits/mnist_gs_auto_split.csv"     # shipped with the repository
+SPLIT_SRC="$SCRIPT_DIR/splits/gs_splits/mnist_gs_auto_split.csv"     # HiddenProbe split shipped with the repository
 SPLIT="$TARGET/mnist_gs_auto_split.csv"
+PROBEGEN_SPLIT="$TARGET/split.csv"
+PROBEGEN_SPLIT_URL="https://raw.githubusercontent.com/AllanYangZhou/nfn/main/experiments/predict_gen_data_splits/mnist_split.csv"
 
 log "============================================================"
 log "MNIST regression dataset setup (Small CNN Zoo)"
@@ -21,12 +23,21 @@ mkdir -p "$TARGET"
 
 install_split() {
     require_file "$SPLIT_SRC"
-    log "Installing shipped split file: $SPLIT_SRC -> $SPLIT"
+    log "Installing HiddenProbe split file: $SPLIT_SRC -> $SPLIT"
     cp -f "$SPLIT_SRC" "$SPLIT"
 }
 
+install_probegen_split() {
+    if [[ -s "$PROBEGEN_SPLIT" ]]; then
+        log "ProbeGen canonical split already exists: $PROBEGEN_SPLIT"
+        return
+    fi
+    log "Downloading canonical NFN/ProbeGen MNIST split -> $PROBEGEN_SPLIT"
+    download_url "$PROBEGEN_SPLIT_URL" "$PROBEGEN_SPLIT"
+}
+
 log "Step 1: checking whether the dataset is already complete."
-if dataset_files_ready "$NAME" "$TARGET" "weights.npy" "metrics.csv.gz" "layout.csv" "mnist_gs_auto_split.csv"; then
+if dataset_files_ready "$NAME" "$TARGET" "weights.npy" "metrics.csv.gz" "layout.csv" "mnist_gs_auto_split.csv" "split.csv"; then
     log "Nothing else to do."
     exit 0
 fi
@@ -35,7 +46,8 @@ log "Step 2: checking whether the model zoo is already extracted."
 if [[ -s "$TARGET/weights.npy" && -s "$TARGET/metrics.csv.gz" && -s "$TARGET/layout.csv" ]]; then
     log "Extracted MNIST model-zoo files are present."
     [[ -s "$SPLIT" ]] || install_split
-    if dataset_files_ready "$NAME" "$TARGET" "weights.npy" "metrics.csv.gz" "layout.csv" "mnist_gs_auto_split.csv"; then
+    install_probegen_split
+    if dataset_files_ready "$NAME" "$TARGET" "weights.npy" "metrics.csv.gz" "layout.csv" "mnist_gs_auto_split.csv" "split.csv"; then
         log "Nothing else to do."
         exit 0
     fi
@@ -89,11 +101,12 @@ mv "$SRC/weights.npy" "$TARGET/weights.npy"
 mv "$SRC/metrics.csv.gz" "$TARGET/metrics.csv.gz"
 mv "$SRC/layout.csv" "$TARGET/layout.csv"
 
-log "Step 8: installing the split file."
+log "Step 8: installing split files."
 [[ -s "$SPLIT" ]] || install_split
+install_probegen_split
 
 log "Step 9: running final dataset sanity check."
-dataset_files_ready "$NAME" "$TARGET" "weights.npy" "metrics.csv.gz" "layout.csv" "mnist_gs_auto_split.csv" || die "$NAME setup finished, but one or more required files are missing."
+dataset_files_ready "$NAME" "$TARGET" "weights.npy" "metrics.csv.gz" "layout.csv" "mnist_gs_auto_split.csv" "split.csv" || die "$NAME setup finished, but one or more required files are missing."
 
 log "Step 10: cleaning up downloaded archive."
 cleanup_archive "$ARCHIVE"
