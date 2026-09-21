@@ -21,7 +21,7 @@ Usage (reproduce-then-learn on CIFAR-10, head fixed at the 0.57 winner):
     --plateau_factor 0.2 --plateau_patience 6 --plateau_min_lr 1e-5 \
     --batch_size 32 --warmup 300 --epochs 50 --eval_every 1000 --exp_name e2e_cifar
 """
-import argparse, math, os, sys, time, torch, torch.nn as nn, torch.nn.functional as F
+import argparse, json, math, os, sys, time, torch, torch.nn as nn, torch.nn.functional as F
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root — portable, no hardcoded path
 sys.path.insert(0, ROOT)   # so data.py and the models/ package import WITHOUT needing PYTHONPATH=.
 from models.lowrank import make_linear
