@@ -31,7 +31,7 @@ Run from the repository root:
     python measurments/benchmark_mnist_regression_forward.py
 
 Optional:
-    python measurments/benchmark_mnist_regression_forward.py --batch-size 32 --repeats 100
+    python measurments/benchmark_mnist_regression_forward.py --batch-size 32 --repeats 2
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-probes", type=int, default=128)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda")
-    p.add_argument("--repeats", type=int, default=100)
+    p.add_argument("--repeats", type=int, default=2)
     p.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     p.add_argument("--split", type=Path, default=DEFAULT_SPLIT)
     return p.parse_args()
