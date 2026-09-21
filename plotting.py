@@ -98,11 +98,20 @@ probe_y = 8.65
 probe_w = 1.15
 probe_h = 0.85
 
-p1_x = 0.95
-p2_x = 2.55
-pN_x = 5.25
+offset = 0.5
+
+p1_x = 0.95 + offset
+p2_x = 2.55 + offset
+p3_x = 4.15 + offset
+
+# Small dots between p3 and pN
+probe_dots_x = 6.15
+
+# Final probe
+pN_x = 6.5
 
 
+# p1
 rounded_box(
     ax,
     p1_x, probe_y,
@@ -112,6 +121,8 @@ rounded_box(
     fontsize=21
 )
 
+
+# p2
 rounded_box(
     ax,
     p2_x, probe_y,
@@ -121,15 +132,30 @@ rounded_box(
     fontsize=21
 )
 
+
+# p3
+rounded_box(
+    ax,
+    p3_x, probe_y,
+    probe_w, probe_h,
+    r"$p_3$",
+    probe_color,
+    fontsize=21
+)
+
+
+# ...
 ax.text(
-    4.35,
+    probe_dots_x,
     probe_y + probe_h / 2,
     r"$\cdots$",
-    fontsize=27,
+    fontsize=15,
     ha="center",
     va="center"
 )
 
+
+# pN
 rounded_box(
     ax,
     pN_x, probe_y,
@@ -144,10 +170,13 @@ rounded_box(
 # Arrow probes -> network
 # ============================================================
 
+# Slightly after p2
+arrow_x = p2_x + probe_w + 0.18
+
 arrow(
     ax,
-    (4.35, 8.45),
-    (4.35, 7.75),
+    (arrow_x, 8.45),
+    (arrow_x, 7.75),
     color="#333333",
     lw=1.7
 )
@@ -383,8 +412,8 @@ classifier_h = 2.8
 # Feature representation -> MLP
 arrow(
     ax,
-    (15.30, 5.00),   # START OF ARROW
-    (18.00, 5.00),   # END OF ARROW
+    (15.30, 5.00),
+    (18.00, 5.00),
     color="#333333",
     lw=1.7
 )
@@ -432,13 +461,13 @@ ax.text(
 plt.tight_layout()
 
 plt.savefig(
-    "hiddenprobe_rotated_v4.png",
+    "hiddenprobe_rotated_v5.png",
     dpi=300,
     bbox_inches="tight"
 )
 
 plt.savefig(
-    "hiddenprobe_rotated_v4.pdf",
+    "hiddenprobe_rotated_v5.pdf",
     bbox_inches="tight"
 )
 
