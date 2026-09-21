@@ -228,9 +228,11 @@ def main() -> None:
 
     # ------------------------------------------------------------------
     # Load ONCE. Both methods receive the exact same target CNN objects.
-    # Everything here is outside the timed region.
+    # This is measured and charged equally to both methods.
     # ------------------------------------------------------------------
     print("[1/3] Loading CIFAR-WP TRAIN split onto the device...")
+    sync(device)
+    data_t0 = time.perf_counter()
     nets, _ = load_cnns(
         "train",
         limit=args.limit,
@@ -238,6 +240,9 @@ def main() -> None:
         splits_path=str(args.splits),
         cnn_cache=str(args.cnn_cache),
     )
+    sync(device)
+    data_load_time = time.perf_counter() - data_t0
+
     if not nets:
         raise RuntimeError("The CIFAR-WP train split is empty.")
 
@@ -246,7 +251,7 @@ def main() -> None:
         for p in net.parameters():
             p.requires_grad_(False)
 
-    print(f"Loaded {len(nets):,} target CNNs.")
+    print(f"Loaded {len(nets):,} target CNNs in {data_load_time:.6f} s.")
     print()
 
     # ------------------------------------------------------------------
@@ -254,10 +259,18 @@ def main() -> None:
     # ------------------------------------------------------------------
     print("[2/3] Constructing parameter-matched ProbeGen and HiddenProbe...")
     seed_all(args.seed)
+    sync(device)
+    pg_build_t0 = time.perf_counter()
     probegen = make_probegen(args.n_probes, args.seed).float().to(device)
+    sync(device)
+    pg_build_time = time.perf_counter() - pg_build_t0
 
     seed_all(args.seed)
+    sync(device)
+    hp_build_t0 = time.perf_counter()
     hiddenprobe = make_hiddenprobe(args.n_probes).float().to(device)
+    sync(device)
+    hp_build_time = time.perf_counter() - hp_build_t0
 
     pg_total, pg_trainable = count_params(probegen)
     hp_total, hp_trainable = count_params(hiddenprobe)
@@ -267,6 +280,8 @@ def main() -> None:
 
     print(f"ProbeGen    total/trainable params: {pg_total:,} / {pg_trainable:,}")
     print(f"HiddenProbe total/trainable params: {hp_total:,} / {hp_trainable:,}")
+    print(f"ProbeGen    build+GPU time: {pg_build_time:.6f} s")
+    print(f"HiddenProbe build+GPU time: {hp_build_time:.6f} s")
     print(
         f"Parameter difference: {diff:+,} "
         f"({diff_pct:.4f}% of HiddenProbe)"
@@ -327,6 +342,12 @@ def main() -> None:
     hp_time = sum(hp_times) / len(hp_times)
     ratio = hp_time / pg_time
 
+    pg_forward_total = sum(pg_times)
+    hp_forward_total = sum(hp_times)
+    pg_end_to_end = data_load_time + pg_build_time + pg_forward_total
+    hp_end_to_end = data_load_time + hp_build_time + hp_forward_total
+    end_to_end_ratio = hp_end_to_end / pg_end_to_end
+
     print()
     print("=" * 78)
     print("RESULT")
@@ -340,8 +361,18 @@ def main() -> None:
     print(f"ProbeGen trainable params   : {pg_trainable:,}")
     print(f"HiddenProbe trainable params: {hp_trainable:,}")
     print(f"Parameter difference        : {diff:+,} ({diff_pct:.4f}%)")
-    print(f"ProbeGen total time         : {pg_time:.6f} s")
-    print(f"HiddenProbe total time      : {hp_time:.6f} s")
+    print()
+    print(f"Shared data load+target GPU : {data_load_time:.6f} s")
+    print(f"ProbeGen build+GPU          : {pg_build_time:.6f} s")
+    print(f"HiddenProbe build+GPU       : {hp_build_time:.6f} s")
+    print(f"ProbeGen forward total      : {pg_forward_total:.6f} s")
+    print(f"HiddenProbe forward total   : {hp_forward_total:.6f} s")
+    print(f"ProbeGen END-TO-END         : {pg_end_to_end:.6f} s")
+    print(f"HiddenProbe END-TO-END      : {hp_end_to_end:.6f} s")
+    print(f"END-TO-END HP / PG          : {end_to_end_ratio:.4f}x")
+    print()
+    print(f"ProbeGen forward/pass       : {pg_time:.6f} s")
+    print(f"HiddenProbe forward/pass    : {hp_time:.6f} s")
     print(f"ProbeGen ms/model           : {1000.0 * pg_time / len(nets):.6f}")
     print(f"HiddenProbe ms/model        : {1000.0 * hp_time / len(nets):.6f}")
     print(f"HiddenProbe / ProbeGen      : {ratio:.4f}x")
