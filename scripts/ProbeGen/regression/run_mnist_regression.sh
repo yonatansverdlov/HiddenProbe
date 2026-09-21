@@ -33,7 +33,7 @@ python "$MAIN_PY" \
   --gen_latent_z 32 \
   --generator_width 16 \
   --per_probe_mlp mlp2 \
-  --per_probe_mlp_width 300 \
+  --per_probe_mlp_width 270 \
   --per_probe_out_dim 10 \
   --per_probe_init standard \
   --r_per_hidden 2 \
