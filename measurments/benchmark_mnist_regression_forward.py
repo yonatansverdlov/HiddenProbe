@@ -1,48 +1,32 @@
 #!/usr/bin/env python3
 """
-Temporary forward-pass timing benchmark:
+End-to-end timing benchmark:
 ProbeGen vs HiddenProbe on the full MNIST-regression TRAIN split.
 
-Protocol
---------
-* Same target CNN objects, same order, same batches for both methods.
-* Full HiddenProbe MNIST regression train split (ReLU SmallCNN zoo models).
-* Q = 128 unique target-network queries for both methods.
-* Batch size = 32.
-* model.eval() + torch.no_grad().
-* BF16 autocast for both methods.
-* Primary reported time is END-TO-END:
-    - target-dataset/cache loading
-    - target-network construction
-    - target-network transfer to GPU
-    - predictor construction + transfer to GPU
-    - all measured forward passes
-* The target dataset is loaded ONCE and the same measured loading time is
-  charged to both methods. This avoids giving the second method an artificial
-  OS/filesystem-cache advantage while still including data loading in the
-  end-to-end number
-* No separate model warmup passes.
-* CUDA is synchronized immediately before starting and after finishing each
-  full-dataset pass.
-* The benchmark aborts unless the two predictors have exactly the same number
-  of trainable parameters.
+Each method is measured ONCE from scratch:
+  data load + target-CNN construction + target-CNN GPU transfer
+  + predictor construction + predictor GPU transfer
+  + one full forward pass over the TRAIN split.
 
-Run from the repository root:
+Both methods use:
+  * the same split and target-model population
+  * Q=128 unique target-network queries/model
+  * batch size 32
+  * model.eval() + torch.no_grad()
+  * BF16 autocast
+  * no warmup
+
+Run from repository root:
     python measurments/benchmark_mnist_regression_forward.py
-
-Optional:
-    python measurments/benchmark_mnist_regression_forward.py --batch-size 32 --repeats 2
 """
 
 from __future__ import annotations
 
 import argparse
 import gc
-import os
 import random
 import sys
 import time
-import statistics
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -59,24 +43,18 @@ from models.probegen_h import ProbeGenH
 
 DEFAULT_DATA_DIR = REPO_ROOT / "data" / "regression" / "mnist"
 DEFAULT_SPLIT = (
-    REPO_ROOT
-    / "scripts"
-    / "setup_data"
-    / "splits"
-    / "gs_splits"
-    / "mnist_gs_auto_split.csv"
+    REPO_ROOT / "scripts" / "setup_data" / "splits" / "gs_splits" / "mnist_gs_auto_split.csv"
 )
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Measure ProbeGen vs HiddenProbe MNIST-regression forward time."
+        description="End-to-end ProbeGen vs HiddenProbe timing on MNIST regression."
     )
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--n-probes", type=int, default=128)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda")
-    p.add_argument("--repeats", type=int, default=2)
     p.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     p.add_argument("--split", type=Path, default=DEFAULT_SPLIT)
     return p.parse_args()
@@ -90,6 +68,11 @@ def seed_all(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def sync(device: torch.device) -> None:
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+
 def count_params(model: torch.nn.Module) -> tuple[int, int]:
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -97,8 +80,6 @@ def count_params(model: torch.nn.Module) -> tuple[int, int]:
 
 
 def make_probegen(n_probes: int, seed: int) -> ProbeGen:
-    # Exact architecture from scripts/ProbeGen/regression/run_mnist_regression.sh.
-    # rank/r_per_hidden are irrelevant because include_hidden_features=False.
     return ProbeGen(
         n_tokens=n_probes,
         d_hidden=300,
@@ -122,9 +103,6 @@ def make_probegen(n_probes: int, seed: int) -> ProbeGen:
 
 
 def make_hiddenprobe(n_probes: int) -> ProbeGenH:
-    # Exact architecture from scripts/HiddenProbe/regression/run_mnist_regression.sh.
-    # adapter_preset=compact resolves to:
-    #   hidden_dim=64, z_hidden_dim=64, fusion_hidden=128, fusion_out=64.
     return ProbeGenH(
         n_out_probes=n_probes,
         n_hidden_probes=n_probes,
@@ -150,51 +128,116 @@ def make_hiddenprobe(n_probes: int) -> ProbeGenH:
     )
 
 
-def sync(device: torch.device) -> None:
-    if device.type == "cuda":
-        torch.cuda.synchronize(device)
+def load_targets(args: argparse.Namespace, device: torch.device):
+    nets, _ = load_svhn_cnns(
+        "train",
+        activation="relu",
+        dev=str(device),
+        data_dir=str(args.data_dir),
+        split_csv=str(args.split),
+        limit=0,
+    )
+    if not nets:
+        raise RuntimeError("The MNIST regression train split is empty.")
+    for net in nets:
+        net.eval()
+        for p in net.parameters():
+            p.requires_grad_(False)
+    return nets
 
 
 @torch.no_grad()
-def timed_full_pass(
-    *,
-    name: str,
+def forward_full(
     model: torch.nn.Module,
     nets: list[torch.nn.Module],
     batch_size: int,
     device: torch.device,
     hiddenprobe: bool,
-) -> float:
+) -> None:
     model.eval()
-
-    sync(device)
-    t0 = time.perf_counter()
-
-    with torch.autocast(
-        "cuda",
-        dtype=torch.bfloat16,
-        enabled=(device.type == "cuda"),
-    ):
+    with torch.autocast("cuda", dtype=torch.bfloat16, enabled=(device.type == "cuda")):
         for start in range(0, len(nets), batch_size):
-            batch = nets[start : start + batch_size]
+            batch = nets[start:start + batch_size]
             if hiddenprobe:
                 _ = model(batch, device=str(device))
             else:
                 _ = model(nets=batch)
 
+
+def run_one(
+    name: str,
+    args: argparse.Namespace,
+    device: torch.device,
+    hiddenprobe: bool,
+) -> dict:
+    # Start timing BEFORE any per-method data/model work.
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
     sync(device)
-    return time.perf_counter() - t0
+
+    seed_all(args.seed)
+    t0 = time.perf_counter()
+
+    # 1) Data load + target construction + target GPU transfer.
+    data_t0 = time.perf_counter()
+    nets = load_targets(args, device)
+    sync(device)
+    data_time = time.perf_counter() - data_t0
+
+    # 2) Predictor construction + GPU transfer.
+    build_t0 = time.perf_counter()
+    if hiddenprobe:
+        model = make_hiddenprobe(args.n_probes).float().to(device)
+    else:
+        model = make_probegen(args.n_probes, args.seed).float().to(device)
+    sync(device)
+    build_time = time.perf_counter() - build_t0
+
+    total_params, trainable_params = count_params(model)
+    queries = (
+        model.n_target_queries()["unique_query_count"]
+        if hiddenprobe else args.n_probes
+    )
+
+    # 3) One complete forward pass.
+    fwd_t0 = time.perf_counter()
+    forward_full(model, nets, args.batch_size, device, hiddenprobe)
+    sync(device)
+    forward_time = time.perf_counter() - fwd_t0
+
+    sync(device)
+    total_time = time.perf_counter() - t0
+
+    n_targets = len(nets)
+
+    # Release this method completely before the next one starts.
+    del model
+    del nets
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    sync(device)
+
+    return {
+        "name": name,
+        "targets": n_targets,
+        "data": data_time,
+        "build": build_time,
+        "forward": forward_time,
+        "total": total_time,
+        "params": total_params,
+        "trainable": trainable_params,
+        "queries": queries,
+    }
 
 
 def main() -> None:
     args = parse_args()
-
     if args.batch_size <= 0:
         raise ValueError("--batch-size must be positive")
     if args.n_probes <= 0:
         raise ValueError("--n-probes must be positive")
-    if args.repeats <= 0:
-        raise ValueError("--repeats must be positive")
 
     device = torch.device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
@@ -214,198 +257,61 @@ def main() -> None:
             + "\nRun: bash scripts/setup_data/regression_mnist.sh"
         )
 
-    seed_all(args.seed)
-
     print("=" * 78)
-    print("MNIST regression forward-pass benchmark")
+    print("MNIST regression END-TO-END benchmark")
     print("=" * 78)
     print(f"device      : {device}")
     if device.type == "cuda":
         print(f"GPU         : {torch.cuda.get_device_name(device)}")
-    print(f"precision   : BF16 autocast (both methods)")
+    print("precision   : BF16 autocast (both)")
     print(f"Q           : {args.n_probes}")
     print(f"batch size  : {args.batch_size}")
-    print(f"repeats     : {args.repeats}")
-    print(f"split       : TRAIN")
-    print(f"activation  : ReLU")
+    print("passes      : 1 per method")
+    print("split       : TRAIN")
     print("warmup      : none")
     print()
 
-    # ------------------------------------------------------------------
-    # Load ONCE. Both predictors receive the exact same target CNN objects.
-    # This is measured and charged equally to both methods.
-    # ------------------------------------------------------------------
-    print("[1/3] Loading the full MNIST-regression TRAIN split onto the device...")
-    sync(device)
-    data_t0 = time.perf_counter()
-    nets, _ = load_svhn_cnns(
-        "train",
-        activation="relu",
-        dev=str(device),
-        data_dir=str(args.data_dir),
-        split_csv=str(args.split),
-        limit=0,
-    )
-    sync(device)
-    data_load_time = time.perf_counter() - data_t0
+    print("[1/2] ProbeGen: loading + constructing + GPU transfer + full forward...")
+    pg = run_one("ProbeGen", args, device, hiddenprobe=False)
+    print(f"      done in {pg['total']:.6f} s")
 
-    if not nets:
-        raise RuntimeError("The MNIST regression train split is empty.")
+    print("[2/2] HiddenProbe: loading + constructing + GPU transfer + full forward...")
+    hp = run_one("HiddenProbe", args, device, hiddenprobe=True)
+    print(f"      done in {hp['total']:.6f} s")
 
-    for net in nets:
-        net.eval()
-        for p in net.parameters():
-            p.requires_grad_(False)
-
-    print(f"Loaded {len(nets):,} target CNNs in {data_load_time:.6f} s.")
-    print()
-
-    # ------------------------------------------------------------------
-    # Construct the two exact predictor architectures.
-    # ------------------------------------------------------------------
-    print("[2/3] Constructing ProbeGen and HiddenProbe...")
-    seed_all(args.seed)
-    sync(device)
-    pg_build_t0 = time.perf_counter()
-    probegen = make_probegen(args.n_probes, args.seed).float().to(device)
-    sync(device)
-    pg_build_time = time.perf_counter() - pg_build_t0
-
-    seed_all(args.seed)
-    sync(device)
-    hp_build_t0 = time.perf_counter()
-    hiddenprobe = make_hiddenprobe(args.n_probes).float().to(device)
-    sync(device)
-    hp_build_time = time.perf_counter() - hp_build_t0
-
-    pg_total, pg_trainable = count_params(probegen)
-    hp_total, hp_trainable = count_params(hiddenprobe)
-
-    print(f"ProbeGen    total/trainable params: {pg_total:,} / {pg_trainable:,}")
-    print(f"HiddenProbe total/trainable params: {hp_total:,} / {hp_trainable:,}")
-    print(f"ProbeGen    build+GPU time: {pg_build_time:.6f} s")
-    print(f"HiddenProbe build+GPU time: {hp_build_time:.6f} s")
-
-    if pg_trainable == hp_trainable:
-        print("Parameter count: MATCH")
-    else:
-        print(
-            "Parameter count: MISMATCH "
-            f"(ProbeGen={pg_trainable:,}, HiddenProbe={hp_trainable:,}) — continuing as requested"
-        )
-
-    pg_queries = args.n_probes
-    hp_queries = hiddenprobe.n_target_queries()["unique_query_count"]
-    print(f"ProbeGen    unique target queries/model: {pg_queries}")
-    print(f"HiddenProbe unique target queries/model: {hp_queries}")
-
-    if pg_queries != hp_queries:
+    if pg["targets"] != hp["targets"]:
         raise RuntimeError(
-            f"Query-count mismatch: ProbeGen={pg_queries}, HiddenProbe={hp_queries}."
+            f"Target-count mismatch: ProbeGen={pg['targets']}, HiddenProbe={hp['targets']}"
+        )
+    if pg["queries"] != hp["queries"]:
+        raise RuntimeError(
+            f"Query-count mismatch: ProbeGen={pg['queries']}, HiddenProbe={hp['queries']}"
         )
 
-    print("Query count:     MATCH")
-    print()
-
-    # Free any transient construction garbage before timing.
-    gc.collect()
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
-    sync(device)
-
-    # ------------------------------------------------------------------
-    # Time repeated complete forward sweeps over the full train split.
-    # No separate warmup pass: repetition 1 is included in the statistics.
-    # Both methods use the exact same BF16 autocast policy.
-    # ------------------------------------------------------------------
-    print(f"[3/3] Timing {args.repeats} complete passes over the full TRAIN split...")
-
-    pg_times = []
-    hp_times = []
-
-    for rep in range(args.repeats):
-        pg_t = timed_full_pass(
-            name="ProbeGen",
-            model=probegen,
-            nets=nets,
-            batch_size=args.batch_size,
-            device=device,
-            hiddenprobe=False,
-        )
-        hp_t = timed_full_pass(
-            name="HiddenProbe",
-            model=hiddenprobe,
-            nets=nets,
-            batch_size=args.batch_size,
-            device=device,
-            hiddenprobe=True,
-        )
-
-        pg_times.append(pg_t)
-        hp_times.append(hp_t)
-
-        if rep == 0 or (rep + 1) % 10 == 0 or rep + 1 == args.repeats:
-            print(
-                f"  pass {rep + 1:3d}/{args.repeats}: "
-                f"ProbeGen={pg_t:.4f}s  HiddenProbe={hp_t:.4f}s  "
-                f"ratio={hp_t / pg_t:.3f}x"
-            )
-
-    pg_mean = statistics.fmean(pg_times)
-    hp_mean = statistics.fmean(hp_times)
-    pg_std = statistics.stdev(pg_times) if len(pg_times) > 1 else 0.0
-    hp_std = statistics.stdev(hp_times) if len(hp_times) > 1 else 0.0
-    pg_med = statistics.median(pg_times)
-    hp_med = statistics.median(hp_times)
-
-    ratios = [h / p for p, h in zip(pg_times, hp_times)]
-    ratio_mean = statistics.fmean(ratios)
-    ratio_std = statistics.stdev(ratios) if len(ratios) > 1 else 0.0
-
-    pg_forward_total = sum(pg_times)
-    hp_forward_total = sum(hp_times)
-    pg_end_to_end = data_load_time + pg_build_time + pg_forward_total
-    hp_end_to_end = data_load_time + hp_build_time + hp_forward_total
-    end_to_end_ratio = hp_end_to_end / pg_end_to_end
+    ratio = hp["total"] / pg["total"]
 
     print()
     print("=" * 78)
-    print("RESULT")
+    print("RESULT — END TO END")
     print("=" * 78)
-    print(f"Target models               : {len(nets):,}")
-    print(f"Full-dataset passes         : {args.repeats}")
-    print(f"Batch size                  : {args.batch_size}")
-    print(f"Precision                   : BF16 autocast (both)")
-    print(f"Unique queries/model        : {args.n_probes}")
-    print(f"ProbeGen trainable params   : {pg_trainable:,}")
-    print(f"HiddenProbe trainable params: {hp_trainable:,}")
+    print(f"Target models               : {pg['targets']:,}")
+    print(f"Unique queries/model        : {pg['queries']}")
+    print(f"ProbeGen trainable params   : {pg['trainable']:,}")
+    print(f"HiddenProbe trainable params: {hp['trainable']:,}")
     print()
-    print(f"Shared data load+target GPU : {data_load_time:.6f} s")
-    print(f"ProbeGen build+GPU          : {pg_build_time:.6f} s")
-    print(f"HiddenProbe build+GPU       : {hp_build_time:.6f} s")
-    print(f"ProbeGen forward total      : {pg_forward_total:.6f} s")
-    print(f"HiddenProbe forward total   : {hp_forward_total:.6f} s")
-    print(f"ProbeGen END-TO-END         : {pg_end_to_end:.6f} s")
-    print(f"HiddenProbe END-TO-END      : {hp_end_to_end:.6f} s")
-    print(f"END-TO-END HP / PG          : {end_to_end_ratio:.4f}x")
+    print("ProbeGen")
+    print(f"  data+targets+GPU          : {pg['data']:.6f} s")
+    print(f"  predictor build+GPU       : {pg['build']:.6f} s")
+    print(f"  full forward              : {pg['forward']:.6f} s")
+    print(f"  TOTAL END-TO-END          : {pg['total']:.6f} s")
     print()
-    print(
-        f"ProbeGen time/pass          : {pg_mean:.6f} ± {pg_std:.6f} s "
-        f"(median {pg_med:.6f}, min {min(pg_times):.6f}, max {max(pg_times):.6f})"
-    )
-    print(
-        f"HiddenProbe time/pass       : {hp_mean:.6f} ± {hp_std:.6f} s "
-        f"(median {hp_med:.6f}, min {min(hp_times):.6f}, max {max(hp_times):.6f})"
-    )
-    print(
-        f"ProbeGen ms/model           : {1000.0 * pg_mean / len(nets):.6f}"
-    )
-    print(
-        f"HiddenProbe ms/model        : {1000.0 * hp_mean / len(nets):.6f}"
-    )
-    print(
-        f"HiddenProbe / ProbeGen      : {ratio_mean:.4f} ± {ratio_std:.4f}x"
-    )
+    print("HiddenProbe")
+    print(f"  data+targets+GPU          : {hp['data']:.6f} s")
+    print(f"  predictor build+GPU       : {hp['build']:.6f} s")
+    print(f"  full forward              : {hp['forward']:.6f} s")
+    print(f"  TOTAL END-TO-END          : {hp['total']:.6f} s")
+    print()
+    print(f"END-TO-END HiddenProbe / ProbeGen: {ratio:.4f}x")
     print("=" * 78)
 
 
