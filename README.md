@@ -3,7 +3,7 @@
 HiddenProbe learns representations of neural networks by evaluating learned probes on a frozen target network and using responses from its hidden layers for downstream prediction. This repository contains the implementation and experiment scripts for INR classification and accuracy prediction on CNN and Transformer model zoos.
 
 <p align="center">
-  <img src="assets/hiddenprobe_overview.svg" width="95%" alt="HiddenProbe overview">
+  <img src="https://raw.githubusercontent.com/yonatansverdlov/HiddenProbe/merged/assets/hiddenprobe_overview.svg" width="95%" alt="HiddenProbe overview">
 </p>
 
 ## Installation
