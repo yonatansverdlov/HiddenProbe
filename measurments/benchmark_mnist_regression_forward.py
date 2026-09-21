@@ -35,8 +35,13 @@ import argparse
 import gc
 import os
 import random
+import sys
 import time
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import numpy as np
 import torch
@@ -46,7 +51,6 @@ from models.probegen_core import ProbeGen
 from models.probegen_h import ProbeGenH
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_DIR = REPO_ROOT / "data" / "regression" / "mnist"
 DEFAULT_SPLIT = (
     REPO_ROOT
