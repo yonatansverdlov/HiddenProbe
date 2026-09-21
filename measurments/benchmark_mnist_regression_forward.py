@@ -11,11 +11,16 @@ Protocol
 * Batch size = 32.
 * model.eval() + torch.no_grad().
 * BF16 autocast for both methods.
-* Measures forward pass ONLY:
-    - dataset loading is outside the timer
-    - target-CNN construction is outside the timer
-    - CPU->GPU transfer is outside the timer
-    - model construction is outside the timer
+* Primary reported time is END-TO-END:
+    - target-dataset/cache loading
+    - target-network construction
+    - target-network transfer to GPU
+    - predictor construction + transfer to GPU
+    - all measured forward passes
+* The target dataset is loaded ONCE and the same measured loading time is
+  charged to both methods. This avoids giving the second method an artificial
+  OS/filesystem-cache advantage while still including data loading in the
+  end-to-end number
 * No separate model warmup passes.
 * CUDA is synchronized immediately before starting and after finishing each
   full-dataset pass.
@@ -228,9 +233,11 @@ def main() -> None:
 
     # ------------------------------------------------------------------
     # Load ONCE. Both predictors receive the exact same target CNN objects.
-    # This happens entirely outside the timed region.
+    # This is measured and charged equally to both methods.
     # ------------------------------------------------------------------
     print("[1/3] Loading the full MNIST-regression TRAIN split onto the device...")
+    sync(device)
+    data_t0 = time.perf_counter()
     nets, _ = load_svhn_cnns(
         "train",
         activation="relu",
@@ -239,6 +246,9 @@ def main() -> None:
         split_csv=str(args.split),
         limit=0,
     )
+    sync(device)
+    data_load_time = time.perf_counter() - data_t0
+
     if not nets:
         raise RuntimeError("The MNIST regression train split is empty.")
 
@@ -247,7 +257,7 @@ def main() -> None:
         for p in net.parameters():
             p.requires_grad_(False)
 
-    print(f"Loaded {len(nets):,} target CNNs.")
+    print(f"Loaded {len(nets):,} target CNNs in {data_load_time:.6f} s.")
     print()
 
     # ------------------------------------------------------------------
@@ -255,16 +265,26 @@ def main() -> None:
     # ------------------------------------------------------------------
     print("[2/3] Constructing ProbeGen and HiddenProbe...")
     seed_all(args.seed)
+    sync(device)
+    pg_build_t0 = time.perf_counter()
     probegen = make_probegen(args.n_probes, args.seed).float().to(device)
+    sync(device)
+    pg_build_time = time.perf_counter() - pg_build_t0
 
     seed_all(args.seed)
+    sync(device)
+    hp_build_t0 = time.perf_counter()
     hiddenprobe = make_hiddenprobe(args.n_probes).float().to(device)
+    sync(device)
+    hp_build_time = time.perf_counter() - hp_build_t0
 
     pg_total, pg_trainable = count_params(probegen)
     hp_total, hp_trainable = count_params(hiddenprobe)
 
     print(f"ProbeGen    total/trainable params: {pg_total:,} / {pg_trainable:,}")
     print(f"HiddenProbe total/trainable params: {hp_total:,} / {hp_trainable:,}")
+    print(f"ProbeGen    build+GPU time: {pg_build_time:.6f} s")
+    print(f"HiddenProbe build+GPU time: {hp_build_time:.6f} s")
 
     if pg_trainable == hp_trainable:
         print("Parameter count: MATCH")
@@ -342,6 +362,12 @@ def main() -> None:
     ratio_mean = statistics.fmean(ratios)
     ratio_std = statistics.stdev(ratios) if len(ratios) > 1 else 0.0
 
+    pg_forward_total = sum(pg_times)
+    hp_forward_total = sum(hp_times)
+    pg_end_to_end = data_load_time + pg_build_time + pg_forward_total
+    hp_end_to_end = data_load_time + hp_build_time + hp_forward_total
+    end_to_end_ratio = hp_end_to_end / pg_end_to_end
+
     print()
     print("=" * 78)
     print("RESULT")
@@ -353,6 +379,15 @@ def main() -> None:
     print(f"Unique queries/model        : {args.n_probes}")
     print(f"ProbeGen trainable params   : {pg_trainable:,}")
     print(f"HiddenProbe trainable params: {hp_trainable:,}")
+    print()
+    print(f"Shared data load+target GPU : {data_load_time:.6f} s")
+    print(f"ProbeGen build+GPU          : {pg_build_time:.6f} s")
+    print(f"HiddenProbe build+GPU       : {hp_build_time:.6f} s")
+    print(f"ProbeGen forward total      : {pg_forward_total:.6f} s")
+    print(f"HiddenProbe forward total   : {hp_forward_total:.6f} s")
+    print(f"ProbeGen END-TO-END         : {pg_end_to_end:.6f} s")
+    print(f"HiddenProbe END-TO-END      : {hp_end_to_end:.6f} s")
+    print(f"END-TO-END HP / PG          : {end_to_end_ratio:.4f}x")
     print()
     print(
         f"ProbeGen time/pass          : {pg_mean:.6f} ± {pg_std:.6f} s "
