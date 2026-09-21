@@ -10,13 +10,13 @@ Protocol
 * Q = 128 unique target-network queries for both methods.
 * Batch size = 32.
 * model.eval() + torch.no_grad().
-* FP32 for both methods.
+* BF16 autocast for both methods.
 * Measures forward pass ONLY:
     - dataset loading is outside the timer
     - target-CNN construction is outside the timer
     - CPU->GPU transfer is outside the timer
     - model construction is outside the timer
-* No model warmup passes.
+* No separate model warmup passes.
 * CUDA is synchronized immediately before starting and after finishing each
   full-dataset pass.
 * The benchmark aborts unless the two predictors have exactly the same number
@@ -26,7 +26,7 @@ Run from the repository root:
     python measurments/benchmark_mnist_regression_forward.py
 
 Optional:
-    python measurments/benchmark_mnist_regression_forward.py --batch-size 32
+    python measurments/benchmark_mnist_regression_forward.py --batch-size 32 --repeats 100
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ import os
 import random
 import sys
 import time
+import statistics
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +71,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-probes", type=int, default=128)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda")
+    p.add_argument("--repeats", type=int, default=100)
     p.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     p.add_argument("--split", type=Path, default=DEFAULT_SPLIT)
     return p.parse_args()
@@ -160,27 +162,23 @@ def timed_full_pass(
 ) -> float:
     model.eval()
 
-    # Loading/construction/transfers are already complete. The timed region
-    # contains only predictor forward calls over the full train split.
     sync(device)
     t0 = time.perf_counter()
 
-    for start in range(0, len(nets), batch_size):
-        batch = nets[start : start + batch_size]
-        if hiddenprobe:
-            _ = model(batch, device=str(device))
-        else:
-            _ = model(nets=batch)
+    with torch.autocast(
+        "cuda",
+        dtype=torch.bfloat16,
+        enabled=(device.type == "cuda"),
+    ):
+        for start in range(0, len(nets), batch_size):
+            batch = nets[start : start + batch_size]
+            if hiddenprobe:
+                _ = model(batch, device=str(device))
+            else:
+                _ = model(nets=batch)
 
     sync(device)
-    elapsed = time.perf_counter() - t0
-
-    print(
-        f"{name:12s}: {elapsed:.6f} s total | "
-        f"{1000.0 * elapsed / len(nets):.6f} ms/model | "
-        f"{len(nets) / elapsed:.2f} models/s"
-    )
-    return elapsed
+    return time.perf_counter() - t0
 
 
 def main() -> None:
@@ -190,6 +188,8 @@ def main() -> None:
         raise ValueError("--batch-size must be positive")
     if args.n_probes <= 0:
         raise ValueError("--n-probes must be positive")
+    if args.repeats <= 0:
+        raise ValueError("--repeats must be positive")
 
     device = torch.device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
@@ -217,9 +217,10 @@ def main() -> None:
     print(f"device      : {device}")
     if device.type == "cuda":
         print(f"GPU         : {torch.cuda.get_device_name(device)}")
-    print(f"precision   : FP32")
+    print(f"precision   : BF16 autocast (both methods)")
     print(f"Q           : {args.n_probes}")
     print(f"batch size  : {args.batch_size}")
+    print(f"repeats     : {args.repeats}")
     print(f"split       : TRAIN")
     print(f"activation  : ReLU")
     print("warmup      : none")
@@ -293,12 +294,17 @@ def main() -> None:
     sync(device)
 
     # ------------------------------------------------------------------
-    # Time exactly one complete forward sweep over the full train split.
-    # No model warmup passes.
+    # Time repeated complete forward sweeps over the full train split.
+    # No separate warmup pass: repetition 1 is included in the statistics.
+    # Both methods use the exact same BF16 autocast policy.
     # ------------------------------------------------------------------
-    print("[3/3] Timing one complete pass over the full TRAIN split...")
-    with torch.no_grad():
-        pg_time = timed_full_pass(
+    print(f"[3/3] Timing {args.repeats} complete passes over the full TRAIN split...")
+
+    pg_times = []
+    hp_times = []
+
+    for rep in range(args.repeats):
+        pg_t = timed_full_pass(
             name="ProbeGen",
             model=probegen,
             nets=nets,
@@ -306,7 +312,7 @@ def main() -> None:
             device=device,
             hiddenprobe=False,
         )
-        hp_time = timed_full_pass(
+        hp_t = timed_full_pass(
             name="HiddenProbe",
             model=hiddenprobe,
             nets=nets,
@@ -315,21 +321,56 @@ def main() -> None:
             hiddenprobe=True,
         )
 
-    ratio = hp_time / pg_time
-    delta_pct = (ratio - 1.0) * 100.0
+        pg_times.append(pg_t)
+        hp_times.append(hp_t)
+
+        if rep == 0 or (rep + 1) % 10 == 0 or rep + 1 == args.repeats:
+            print(
+                f"  pass {rep + 1:3d}/{args.repeats}: "
+                f"ProbeGen={pg_t:.4f}s  HiddenProbe={hp_t:.4f}s  "
+                f"ratio={hp_t / pg_t:.3f}x"
+            )
+
+    pg_mean = statistics.fmean(pg_times)
+    hp_mean = statistics.fmean(hp_times)
+    pg_std = statistics.stdev(pg_times) if len(pg_times) > 1 else 0.0
+    hp_std = statistics.stdev(hp_times) if len(hp_times) > 1 else 0.0
+    pg_med = statistics.median(pg_times)
+    hp_med = statistics.median(hp_times)
+
+    ratios = [h / p for p, h in zip(pg_times, hp_times)]
+    ratio_mean = statistics.fmean(ratios)
+    ratio_std = statistics.stdev(ratios) if len(ratios) > 1 else 0.0
 
     print()
     print("=" * 78)
     print("RESULT")
     print("=" * 78)
     print(f"Target models               : {len(nets):,}")
+    print(f"Full-dataset passes         : {args.repeats}")
     print(f"Batch size                  : {args.batch_size}")
+    print(f"Precision                   : BF16 autocast (both)")
     print(f"Unique queries/model        : {args.n_probes}")
-    print(f"Trainable params (each)     : {pg_trainable:,}")
-    print(f"ProbeGen total time         : {pg_time:.6f} s")
-    print(f"HiddenProbe total time      : {hp_time:.6f} s")
-    print(f"HiddenProbe / ProbeGen      : {ratio:.4f}x")
-    print(f"HiddenProbe runtime change  : {delta_pct:+.2f}%")
+    print(f"ProbeGen trainable params   : {pg_trainable:,}")
+    print(f"HiddenProbe trainable params: {hp_trainable:,}")
+    print()
+    print(
+        f"ProbeGen time/pass          : {pg_mean:.6f} ± {pg_std:.6f} s "
+        f"(median {pg_med:.6f}, min {min(pg_times):.6f}, max {max(pg_times):.6f})"
+    )
+    print(
+        f"HiddenProbe time/pass       : {hp_mean:.6f} ± {hp_std:.6f} s "
+        f"(median {hp_med:.6f}, min {min(hp_times):.6f}, max {max(hp_times):.6f})"
+    )
+    print(
+        f"ProbeGen ms/model           : {1000.0 * pg_mean / len(nets):.6f}"
+    )
+    print(
+        f"HiddenProbe ms/model        : {1000.0 * hp_mean / len(nets):.6f}"
+    )
+    print(
+        f"HiddenProbe / ProbeGen      : {ratio_mean:.4f} ± {ratio_std:.4f}x"
+    )
     print("=" * 78)
 
 
