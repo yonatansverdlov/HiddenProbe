@@ -15,7 +15,6 @@ runs/
 wandb/
 results/
 logs/
-figs/
 sweeps/
 
 # Checkpoints / logs / dumps
