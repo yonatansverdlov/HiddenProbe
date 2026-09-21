@@ -81,36 +81,26 @@ Run all commands from the repository root. Each experiment script automatically 
 
 ### Transformer accuracy prediction
 
-For MNIST-Transformers we report five accuracy-threshold settings. For each threshold, target models below the threshold are removed first, and the remaining population is then split into 70% train, 15% validation, and 15% test. Each script runs five training seeds.
+For MNIST-Transformers and AGNews-Transformers we report five accuracy-threshold settings. For each threshold, target models below the threshold are removed first, and the remaining population is then split into 70% train, 15% validation, and 15% test. Each script runs five training seeds.
 
-**No threshold**
+**MNIST-Transformers**
 
 ```bash
 ./scripts/HiddenProbe/regression/run_mnist_transformer_thresh0.sh
-```
-
-**20% threshold**
-
-```bash
 ./scripts/HiddenProbe/regression/run_mnist_transformer_thresh20.sh
-```
-
-**40% threshold**
-
-```bash
 ./scripts/HiddenProbe/regression/run_mnist_transformer_thresh40.sh
-```
-
-**60% threshold**
-
-```bash
 ./scripts/HiddenProbe/regression/run_mnist_transformer_thresh60.sh
+./scripts/HiddenProbe/regression/run_mnist_transformer_thresh80.sh
 ```
 
-**80% threshold**
+**AGNews-Transformers**
 
 ```bash
-./scripts/HiddenProbe/regression/run_mnist_transformer_thresh80.sh
+./scripts/HiddenProbe/regression/run_agnews_transformer_thresh0.sh
+./scripts/HiddenProbe/regression/run_agnews_transformer_thresh20.sh
+./scripts/HiddenProbe/regression/run_agnews_transformer_thresh40.sh
+./scripts/HiddenProbe/regression/run_agnews_transformer_thresh60.sh
+./scripts/HiddenProbe/regression/run_agnews_transformer_thresh80.sh
 ```
 
 ## Repository structure
