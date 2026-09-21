@@ -59,8 +59,14 @@ def test_preds(d):
     a = ck["cfg"]; cfg = build(a, ck["state_dict"])
     sysm = LearnedSystem(cfg); sysm.load_state_dict(ck["state_dict"]); sysm.to(dev).eval()
     mean, std = ck["norm"]["mean"], ck["norm"]["std"]
-    te = IN.load_zoo_cached(a["data_root"], a["dataset"], "test", seed=0)
-    assert te is not None, f"no test cache for {a['dataset']} (run the `cache` subcommand)"
+    cut = float(a.get("cut_off", 0.0))
+    te = IN.load_zoo_cached(
+        a["data_root"], a["dataset"], "test", seed=0, cut_off=cut
+    )
+    assert te is not None, (
+        f"no threshold-specific test cache for {a['dataset']} cut_off={cut} "
+        "(run the `cache` subcommand with the same --cut_off)"
+    )
     te = [z for z in te if T.classifier_out_dim(z["params"]) == a["n_classes"]]
     lim = int(os.environ.get("TP_TESTLIMIT", "0"))          # fast approximate ranking on CPU; 0 = full test
     if lim:
@@ -99,12 +105,14 @@ for d in dirs:
     for i, v in p.items():
         acc.setdefault(i, []).append(v)
 n = len(seed_taus)
-cut = float(a.get("cut_off", 0.0))                       # threshold protocol: model retrained on acc>=cut_off,
-if cut > 0:                                              # so evaluate tau on the matching acc>=cut_off test subset
-    keep = [i for i in trues0 if trues0[i] >= cut]
-    seed_taus = [tau({i: sp[i] for i in keep}, trues0) for sp in seed_preds]
-    acc = {i: acc[i] for i in keep}
-    print(f"  [cut_off {cut}] eval on {len(keep)} test targets with acc>=cut_off")
+cut = float(a.get("cut_off", 0.0))
+if cut > 0:
+    # The test cache was built AFTER filtering the population by cut_off and
+    # then creating a fresh 70/15/15 split, matching Transformer-NFN.
+    print(
+        f"  [cut_off {cut}] threshold-specific test split: "
+        f"{len(trues0)} targets"
+    )
 mean = sum(seed_taus) / n
 std = statistics.stdev(seed_taus) if n > 1 else 0.0
 ens = {i: sum(vs) / len(vs) for i, vs in acc.items()}
@@ -115,8 +123,8 @@ print(f"  SINGLE-MODEL ({n}-seed mean+/-std) test_tau {mean:.4f} +/- {std:.4f}")
 # aux only — NOT the reported metric: a K-model prediction ensemble (K x params, breaks the param-cap fairness).
 print(f"  [aux] {n}-model prediction-ensemble test_tau {et:.4f}  (not the single-model protocol)")
 
-# TP_THRESH=1: accuracy-thresholded tau (Quasi-NFN arXiv:2604.23720 Table-3 protocol) — keep targets whose
-# TRUE test-acc >= the p-th percentile, recompute tau on that harder high-acc subset. Post-hoc on cached preds.
+# TP_THRESH=1 is an auxiliary post-hoc analysis only. It does NOT reproduce
+# the Transformer-NFN retrain-per-threshold protocol; use separate --cut_off runs for that.
 if os.environ.get("TP_THRESH"):
     ids = sorted(ens)
     # Quasi-NFN / Transformer-NFN protocol: keep checkpoints with TRUE test-accuracy >= an ABSOLUTE cutoff
