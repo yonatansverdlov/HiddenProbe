@@ -1432,33 +1432,22 @@ def main():
     summary_csv = os.path.join(base_exp_dir, "seeds_summary.csv")
     summary_df.to_csv(summary_csv, index=False)
 
-    print("\n========== Seeds summary ==========")
-    print(f"task: {args.task}")
-    print(f"dataset: {args.dataset}")
-    print(f"num_seeds: {args.num_seeds}")
-    print(f"seeds: {summary_df['seed'].tolist()}")
-    print(f"summary csv: {summary_csv}")
+    dataset_label = args.dataset.upper()
+    model_label = "ProbeGen" if args.method == "probegen" else "HiddenProbe"
 
+    print()
+    print(f"{dataset_label} — {model_label}")
     if args.task == "regression":
-        val_mean, val_std = mean_std(summary_df["best_val_tau"].values)
         test_mean, test_std = mean_std(summary_df["best_test_tau"].values)
-        print(
-            f"Best val Kendall tau:  mean={val_mean:.6f}, std={val_std:.6f}"
-        )
-        print(
-            f"Best test Kendall tau: mean={test_mean:.6f}, std={test_std:.6f}"
-        )
+        vals = summary_df["best_test_tau"].values
+        print(f"Test Kendall tau: {test_mean:.4f} ± {test_std:.4f}")
+        print("Seeds: " + ", ".join(f"{v:.4f}" for v in vals))
     else:
-        val_mean, val_std = mean_std(summary_df["best_val_acc"].values)
         test_mean, test_std = mean_std(summary_df["best_test_acc"].values)
-        print(
-            f"Best val accuracy:  mean={val_mean:.6f}, std={val_std:.6f}"
-        )
-        print(
-            f"Best test accuracy: mean={test_mean:.6f}, std={test_std:.6f}"
-        )
-
-    print("===================================\n")
+        vals = summary_df["best_test_acc"].values
+        print(f"Test accuracy: {test_mean:.4f} ± {test_std:.4f}")
+        print("Seeds: " + ", ".join(f"{v:.4f}" for v in vals))
+    print()
 
 
 if __name__ == "__main__":
