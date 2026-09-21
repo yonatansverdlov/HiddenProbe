@@ -1,6 +1,6 @@
 # HiddenProbe
 
-HiddenProbe learns representations of neural networks by evaluating learned probes on a frozen target network and using responses from its hidden layers for downstream prediction. This repository contains the implementation and experiment scripts for INR classification and accuracy prediction on CNN and Transformer model zoos.
+HiddenProbe learns representations of neural networks by evaluating learned probes on a frozen target network and using responses from its hidden layers for downstream prediction. This repository contains the implementation and experiment scripts for INR classification and model accuracy prediction.
 
 <p align="center">
   <img src="assets/hiddenprobe_overview.png" width="95%" alt="HiddenProbe overview">
@@ -47,7 +47,7 @@ Run all commands from the repository root. Each experiment script automatically 
 ./scripts/HiddenProbe/classification/run_cifar10_inr_aug.sh
 ```
 
-### CNN accuracy prediction
+### Model accuracy prediction
 
 **MNIST**
 
