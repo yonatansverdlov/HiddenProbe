@@ -9,6 +9,11 @@ DATA_ROOT="${DATA_ROOT:-data}"
 CUT="0.2"
 NUM_SEEDS=5
 
+# Threshold-specific selected configuration from the HiddenProbe reference branch.
+PRED_LR=2.5e-4
+GEN_LR=5e-4
+DROPOUT=0.1
+
 bash scripts/setup_data/regression_mnist_transformer.sh
 
 # Transformer-NFN threshold protocol:
@@ -34,14 +39,14 @@ for ((SEED=0; SEED<NUM_SEEDS; SEED++)); do
       --readout multi \
       --readout_arch channel_trajectory \
       --cut_off "$CUT" \
-      --pred_lr 2.5e-4 \
-      --gen_lr 5e-4 \
+      --pred_lr "$PRED_LR" \
+      --gen_lr "$GEN_LR" \
       --scheduler plateau \
       --plateau_patience 5 \
       --plateau_factor 0.5 \
       --warmup 0 \
       --weight_decay 1e-3 \
-      --dropout 0.1 \
+      --dropout "$DROPOUT" \
       --max_updates 40000 \
       --eval_every 1000 \
       --micro 32 \
