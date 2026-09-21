@@ -20,9 +20,8 @@ for p in args.summaries:
     taus.append(float(summary["final_test_tau"]))
 
 mean = statistics.fmean(taus)
-std = statistics.pstdev(taus)
+std = statistics.stdev(taus) if len(taus) > 1 else 0.0
 
-print(f"Dataset: {args.dataset}")
-print(f"Model: {args.model}")
-print(f"Mean: {mean:.4f}")
-print(f"Std:  {std:.4f}")
+print(f"{args.dataset} — {args.model}")
+print(f"Test Kendall tau: {mean:.4f} ± {std:.4f}")
+print("Seeds: " + ", ".join(f"{v:.4f}" for v in taus))
