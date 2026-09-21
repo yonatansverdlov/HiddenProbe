@@ -30,9 +30,14 @@ def _iter_ep75(root: str, dataset: str):
             yield m.group(1), int(m.group(2)), p
 
 
-def build_manifest(root: str, dataset: str, seed: int = 0,
+def build_manifest(root: str, dataset: str, seed: int = 0, cut_off: float = 0.0,
                    frac=(0.70, 0.15, 0.15)) -> List[Dict]:
-    """Deterministic epoch-75 manifest with a seeded 70/15/15 run-disjoint split. No file mutation."""
+    """Deterministic epoch-75 manifest with filter-before-split threshold protocol.
+
+    The Transformer-NFN paper filters the epoch-75 population by absolute
+    accuracy threshold first, then shuffles/splits the surviving population
+    70/15/15. cut_off is expressed on the normalized [0,1] accuracy scale.
+    """
     recs = {}
     for run_id, acc_raw, path in _iter_ep75(root, dataset):
         if run_id in recs:                      # exact-duplicate run_id at epoch-75 -> keep first, flag
@@ -44,8 +49,14 @@ def build_manifest(root: str, dataset: str, seed: int = 0,
             "original_label_scale": "x100_percent", "normalized_accuracy": acc_raw / 10000.0,
             "integrity_status": "ok", "exclusion_reason": "",
         }
-    run_ids = sorted(recs)                        # stable order (not filesystem/hash order)
-    rng = random.Random(f"tp-split-{dataset}-{seed}")
+    if cut_off > 0:
+        recs = {
+            rid: r for rid, r in recs.items()
+            if r["normalized_accuracy"] >= cut_off
+        }
+
+    run_ids = sorted(recs)                        # stable order after threshold filtering
+    rng = random.Random(f"tp-split-{dataset}-{seed}-cut{cut_off:.6f}")
     rng.shuffle(run_ids)
     n = len(run_ids); n_tr = int(frac[0] * n); n_va = int(frac[1] * n)
     split = {}
@@ -108,29 +119,42 @@ def load_zoo(manifest: List[Dict], split: str, device="cpu", limit: int = 0) -> 
 
 
 # ---------------- consolidated cache (avoid ~11k per-cell torch.load calls over NAS) ----------------
-def cache_path(root: str, dataset: str, split: str, seed: int) -> str:
-    return os.path.join(root, f"tpcache_{dataset}_{split}_s{seed}.pt")
+def _cut_tag(cut_off: float) -> str:
+    pct = int(round(float(cut_off) * 100))
+    return f"cut{pct:02d}"
 
 
-def build_cache(root: str, dataset: str, seed: int = 0, overwrite: bool = False) -> Dict[str, object]:
-    """Load every split ONCE (the slow per-file path) and consolidate each into a single .pt file.
-    Run once before a sweep; every training cell then loads one file in seconds via load_zoo_cached."""
-    man = build_manifest(root, dataset, seed=seed)
+def cache_path(root: str, dataset: str, split: str, seed: int, cut_off: float = 0.0) -> str:
+    return os.path.join(root, f"tpcache_{dataset}_{split}_{_cut_tag(cut_off)}_s{seed}.pt")
+
+
+def build_cache(root: str, dataset: str, seed: int = 0, cut_off: float = 0.0,
+                overwrite: bool = False) -> Dict[str, object]:
+    """Build one consolidated cache per threshold-specific 70/15/15 split."""
+    man = build_manifest(root, dataset, seed=seed, cut_off=cut_off)
     assert man, f"no epoch-75 checkpoints under {root} for {dataset}"
     counts = {}
     for split in ("train", "val", "test"):
-        path = cache_path(root, dataset, split, seed)
+        path = cache_path(root, dataset, split, seed, cut_off=cut_off)
         if os.path.exists(path) and not overwrite:
             counts[split] = "exists"; continue
         zoo = load_zoo(man, split)                                     # the slow per-file load, done ONCE
-        torch.save({"dataset": dataset, "split": split, "seed": seed, "n": len(zoo), "zoo": zoo}, path)
+        torch.save({
+            "dataset": dataset,
+            "split": split,
+            "seed": seed,
+            "cut_off": float(cut_off),
+            "n": len(zoo),
+            "zoo": zoo,
+        }, path)
         counts[split] = len(zoo)
     return counts
 
 
-def load_zoo_cached(root: str, dataset: str, split: str, seed: int = 0, limit: int = 0):
-    """Return the consolidated split if the cache exists, else None (caller falls back to per-file load)."""
-    path = cache_path(root, dataset, split, seed)
+def load_zoo_cached(root: str, dataset: str, split: str, seed: int = 0,
+                    cut_off: float = 0.0, limit: int = 0):
+    """Return the threshold-specific consolidated split if it exists."""
+    path = cache_path(root, dataset, split, seed, cut_off=cut_off)
     if not os.path.exists(path):
         return None
     d = torch.load(path, map_location="cpu", weights_only=False)       # our own pickle of {id,params,label}
