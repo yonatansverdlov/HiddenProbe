@@ -12,11 +12,16 @@ Protocol
 * Exactly ONE full-dataset pass by default.
 * model.eval() + torch.no_grad().
 * BF16 autocast for both methods.
-* Measures forward pass ONLY:
-    - dataset/cache loading is outside the timer
-    - target-CNN construction is outside the timer
-    - CPU->GPU transfer is outside the timer
-    - predictor construction is outside the timer
+* Primary reported time is END-TO-END:
+    - target-dataset/cache loading
+    - target-network construction
+    - target-network transfer to GPU
+    - predictor construction + transfer to GPU
+    - all measured forward passes
+* The target dataset is loaded ONCE and the same measured loading time is
+  charged to both methods. This avoids giving the second method an artificial
+  OS/filesystem-cache advantage while still including data loading in the
+  end-to-end number
 * No separate warmup pass.
 * CUDA is synchronized immediately before and after each complete pass.
 * Architectures are parameter-matched as closely as possible:
