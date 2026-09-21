@@ -27,13 +27,13 @@ python "$MAIN_PY" \
   --epochs 60 \
   --batch_size 64 \
   --n_probes "$N_PROBES" \
-  --d_hid 351 \
+  --d_hid 300 \
   --mixer_n_layers 6 \
   --gen_type deep_linear_6 \
   --gen_latent_z 32 \
   --generator_width 16 \
   --per_probe_mlp mlp2 \
-  --per_probe_mlp_width 270 \
+  --per_probe_mlp_width 256 \
   --per_probe_out_dim 10 \
   --per_probe_init standard \
   --r_per_hidden 2 \
