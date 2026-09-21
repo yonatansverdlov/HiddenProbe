@@ -17,7 +17,9 @@ for item in args.summaries:
         summary = json.load(f)
     values.append(float(summary["best_test_acc"]))
 
-print(f"Dataset: {args.dataset}")
-print(f"Model: {args.model}")
-print(f"Mean: {statistics.fmean(values):.4f}")
-print(f"Std:  {statistics.pstdev(values):.4f}")
+mean = statistics.fmean(values)
+std = statistics.stdev(values) if len(values) > 1 else 0.0
+
+print(f"{args.dataset} — {args.model}")
+print(f"Test accuracy: {mean:.4f} ± {std:.4f}")
+print("Seeds: " + ", ".join(f"{v:.4f}" for v in values))
