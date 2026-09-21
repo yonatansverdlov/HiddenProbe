@@ -94,7 +94,7 @@ def make_probegen(n_probes: int, seed: int) -> ProbeGen:
     # rank/r_per_hidden are irrelevant because include_hidden_features=False.
     return ProbeGen(
         n_tokens=n_probes,
-        d_hidden=351,
+        d_hidden=300,
         models_c_in=1,
         models_c_out=10,
         d_out=1,
@@ -104,7 +104,7 @@ def make_probegen(n_probes: int, seed: int) -> ProbeGen:
         mixer_n_layers=6,
         include_hidden_features=False,
         per_probe_mlp="mlp2",
-        per_probe_mlp_width=270,
+        per_probe_mlp_width=256,
         per_probe_out_dim=10,
         per_probe_init="standard",
         n_hidden_target_layers=0,
