@@ -95,33 +95,28 @@ def tau(pred_by_id, true_by_id):
 
 import statistics
 acc, cfg0, trues0, seed_taus, seed_preds = {}, None, None, [], []
-print(f"== TEST eval | pattern {pat} ==")
 for d in dirs:
     a, p, t = test_preds(d)
     cfg0 = cfg0 or (a["dataset"], a["generator"], a["n_probes"], a["readout"], a["pred_lr"], a["gen_lr"], a["scheduler"])
     trues0 = trues0 or t
     st = tau(p, t); seed_taus.append(st); seed_preds.append(p)
-    print(f"  seed {a['seed']}  test_tau {st:.4f}   {os.path.basename(d)}")
     for i, v in p.items():
         acc.setdefault(i, []).append(v)
 n = len(seed_taus)
 cut = float(a.get("cut_off", 0.0))
-if cut > 0:
-    # The test cache was built AFTER filtering the population by cut_off and
-    # then creating a fresh 70/15/15 split, matching Transformer-NFN.
-    print(
-        f"  [cut_off {cut}] threshold-specific test split: "
-        f"{len(trues0)} targets"
-    )
 mean = sum(seed_taus) / n
 std = statistics.stdev(seed_taus) if n > 1 else 0.0
 ens = {i: sum(vs) / len(vs) for i, vs in acc.items()}
 et = tau(ens, trues0)
-print(f"  ---- config {cfg0} ----")
-# OUR PROTOCOL (comparable to the papers): mean +/- std of the per-seed single-model test tau.
-print(f"  SINGLE-MODEL ({n}-seed mean+/-std) test_tau {mean:.4f} +/- {std:.4f}")
-# aux only — NOT the reported metric: a K-model prediction ensemble (K x params, breaks the param-cap fairness).
-print(f"  [aux] {n}-model prediction-ensemble test_tau {et:.4f}  (not the single-model protocol)")
+threshold_pct = int(round(cut * 100))
+dataset_label = str(a["dataset"]).upper()
+print(f"{dataset_label} Transformer — threshold {threshold_pct}")
+print(f"Test Kendall tau: {mean:.4f} ± {std:.4f}")
+print("Seeds: " + ", ".join(f"{v:.4f}" for v in seed_taus))
+
+# Auxiliary ensemble is intentionally hidden from the normal result summary.
+if os.environ.get("TP_SHOW_AUX"):
+    print(f"Auxiliary {n}-model ensemble tau: {et:.4f}")
 
 # TP_THRESH=1 is an auxiliary post-hoc analysis only. It does NOT reproduce
 # the Transformer-NFN retrain-per-threshold protocol; use separate --cut_off runs for that.
