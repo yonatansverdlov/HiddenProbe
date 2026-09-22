@@ -45,12 +45,13 @@ def _rng_restore(s):
         torch.cuda.set_rng_state_all([t.cpu() for t in s["torch_cuda"]])
 
 
-def save_training_state(path, model, opt, sched, epoch, step, best, bstate):
+def save_training_state(path, model, opt, sched, epoch, step, best, bstate, best_epoch=0, best_step=0):
     """Full resume state saved at an EPOCH BOUNDARY: everything needed to continue bit-for-bit."""
     torch.save({"model": {k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
                 "optimizer": opt.state_dict(), "scheduler": sched.state_dict(),
                 "epoch": epoch, "global_step": step, "best_val_tau": best,
-                "best_state": bstate, "rng": _rng_capture()}, path)
+                "best_state": bstate, "best_epoch": best_epoch, "best_step": best_step,
+                "rng": _rng_capture()}, path)
 
 
 def write_run_metadata(out_dir, args):
@@ -497,7 +498,8 @@ for ep in range(start_epoch, args.epochs):
                 new_best=isb,
             )
     # end of epoch: save resume-safe training state (RNG captured HERE = just before next epoch's perm)
-    save_training_state(STATE_PATH, model, opt, sched, ep + 1, step, best, bstate)
+    save_training_state(STATE_PATH, model, opt, sched, ep + 1, step, best, bstate,
+                        best_epoch=best_epoch, best_step=best_step)
 
 # ---- checkpoint policy (§8): save FINAL-epoch ckpt + report both final-epoch and best-val test ----
 torch.save({k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
