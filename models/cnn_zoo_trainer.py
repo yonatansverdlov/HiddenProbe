@@ -407,8 +407,8 @@ if args.eval_only_ckpt:                                       # SALVAGE / pred-d
     json.dump({"exp": args.exp_name, "seed": args.seed, "queries": Q, "target_space": args.target_space,
                "scheduler": args.scheduler, "salvaged_from": args.eval_only_ckpt, "mode": "eval_only",
                "final_val_tau": fv["tau_b"], "final_val_mse": fv["acc_mse"] * 1e5, "final_val_mae": fv["acc_mae"],
-               "finalepoch_test_tau": ff["tau_b"], "finalepoch_test_accmse_x1e5": ff["acc_mse"] * 1e5,
-               "finalepoch_test_accmae": ff["acc_mae"]},
+               "checkpoint_test_tau": ff["tau_b"], "checkpoint_test_accmse_x1e5": ff["acc_mse"] * 1e5,
+               "checkpoint_test_accmae": ff["acc_mae"]},
               open(os.path.join(args.out_dir, "summary.json"), "w"), indent=2)
     raise SystemExit(0)
 
