@@ -17,6 +17,7 @@ Kahana baseline (128 output probes):
 import argparse, os, time, json, random, subprocess, sys, torch, torch.nn as nn, torch.nn.functional as F
 import numpy as np
 from models.probegen_h import ProbeGenH
+from models.logging_utils import print_run_config, print_eval, print_seed_result
 from data import load_cnns, DEFAULT_SPLITS
 from models.metrics_cnn import acc_to_logit, all_metrics
 
@@ -313,9 +314,28 @@ _total_steps = args.epochs * _steps_per_epoch
 _sched_epochs = args.sched_total_epochs or args.epochs               # cosine horizon (>= --epochs for early-stop+resume)
 _sched_total_steps = _sched_epochs * _steps_per_epoch
 _planned_evals = _total_steps // max(1, args.eval_every)             # periodic (mid-training) evals
-print(f"dataset={args.dataset_name or args.zoo} seed={args.seed} n_probes={args.n_out_probes}", flush=True)
-print(f"train={len(trN)} val={len(vaN)} test={len(teN)}", flush=True)
-print(f"epochs={args.epochs} batch_size={args.batch_size} total_steps={_total_steps} eval_every={args.eval_every}", flush=True)
+dataset_label = {
+    "mnist_gs": "MNIST",
+    "fmnist_gs": "FMNIST",
+    "svhn_gs": "SVHN",
+    "cifar_gs": "CIFAR10-GS",
+    "wp": "CIFAR10-WP",
+}.get(args.zoo, args.dataset_name or args.zoo)
+_total_params = sum(p.numel() for p in model.parameters())
+print_run_config(
+    method="HiddenProbe" if args.hidden_mode == "on" else "ProbeGen",
+    task="regression",
+    dataset=dataset_label,
+    seed=args.seed,
+    experiment=args.exp_name,
+    train_size=len(trN),
+    val_size=len(vaN),
+    test_size=len(teN),
+    probes=args.n_out_probes,
+    parameters=_total_params,
+    trainable=rep["total_trainable"],
+    device=DEV,
+)
 if _planned_evals < 6 and not args.allow_sparse_eval and not args.eval_only_ckpt:
     print(f"[EVALPLAN] ABORT exp={args.exp_name}: planned_periodic_evals={_planned_evals} < 6 "
           f"(eval_every={args.eval_every} vs total_steps={_total_steps}). This is the Round-1 bug: a short job "
@@ -391,11 +411,14 @@ if args.eval_only_ckpt:                                       # SALVAGE / pred-d
     raise SystemExit(0)
 
 N = len(trN); step = 0; best = -1.0; bstate = None; start_epoch = 0
+best_epoch = 0; best_step = 0
 if args.resume_training_state:
     rs = torch.load(args.resume_training_state, map_location=DEV)
     model.load_state_dict({k: v.to(DEV) for k, v in rs["model"].items()})
     opt.load_state_dict(rs["optimizer"]); sched.load_state_dict(rs["scheduler"])
     start_epoch = rs["epoch"]; step = rs["global_step"]; best = rs["best_val_tau"]; bstate = rs["best_state"]
+    best_epoch = rs.get("best_epoch", start_epoch)
+    best_step = rs.get("best_step", step)
     _rng_restore(rs["rng"])                                            # reproduce data order from the resume point
     print(f"[RESUME] {args.exp_name} from {args.resume_training_state}: epoch {start_epoch} step {step} "
           f"best_val_tau {best:.4f} -> continuing to --epochs {args.epochs}", flush=True)
@@ -405,6 +428,8 @@ STATE_PATH = os.path.join(args.out_dir, "training_state.pt")
 if args.eval_at_init and not args.resume_training_state:
     vm0 = ev(vaN, vaY, nmax=args.val_subset)                          # score the (warm/nested) init at step 0
     best = vm0["tau_b"]
+    best_epoch = 0
+    best_step = 0
     bstate = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
     torch.save(bstate, os.path.join(args.out_dir, "best.pt"))
     logrow(f"{args.exp_name},0,{opt.param_groups[0]['lr']:.2e},nan,{vm0['tau_b']:.4f},"
@@ -414,16 +439,6 @@ if args.eval_at_init and not args.resume_training_state:
 
 _timing_start_step = step
 _t0 = time.time()
-
-def _fmt_duration(seconds):
-    seconds = max(0, int(round(seconds)))
-    h, rem = divmod(seconds, 3600)
-    m, s = divmod(rem, 60)
-    if h:
-        return f"{h}h{m:02d}m{s:02d}s"
-    if m:
-        return f"{m}m{s:02d}s"
-    return f"{s}s"
 
 for ep in range(start_epoch, args.epochs):
     perm = torch.randperm(N)
@@ -459,21 +474,27 @@ for ep in range(start_epoch, args.epochs):
             isb = vm["tau_b"] > best
             if isb:
                 best = vm["tau_b"]
+                best_epoch = ep + 1
+                best_step = step
                 bstate = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
                 torch.save(bstate, os.path.join(args.out_dir, "best.pt"))
             logrow(f"{args.exp_name},{step},{opt.param_groups[0]['lr']:.2e},{loss.item():.4f},"
                    f"{vm['tau_b']:.4f},{vm['acc_mse']*1e5:.2f},{vm['acc_mae']:.4f},"
                    f"{tm['tau_b']:.4f},{tm['acc_mse']*1e5:.2f},{tm['acc_mae']:.4f},{Q},{isb}")
-            suffix = " NEW_BEST" if isb else ""
             elapsed = time.time() - _t0
             steps_done_this_run = max(1, step - _timing_start_step)
             sec_per_step = elapsed / steps_done_this_run
             eta = sec_per_step * max(0, _total_steps - step)
-            print(
-                f"step={step} epoch={ep} val_tau={vm['tau_b']:.4f} "
-                f"test_tau={tm['tau_b']:.4f} time_elapsed={_fmt_duration(elapsed)} "
-                f"time_remaining={_fmt_duration(eta)}{suffix}",
-                flush=True,
+            print_eval(
+                task="regression",
+                step=step,
+                epoch=ep + 1,
+                train_loss=loss.item(),
+                val_value=vm["tau_b"],
+                test_value=tm["tau_b"],
+                elapsed=elapsed,
+                remaining=eta,
+                new_best=isb,
             )
     # end of epoch: save resume-safe training state (RNG captured HERE = just before next epoch's perm)
     save_training_state(STATE_PATH, model, opt, sched, ep + 1, step, best, bstate)
@@ -534,6 +555,14 @@ _summ = {"exp": args.exp_name, "seed": args.seed, "queries": Q, "params": rep["t
          "final_val_tau": fv["tau_b"], "final_val_mse": fv["acc_mse"] * 1e5, "final_val_mae": fv["acc_mae"],
          "val_trajectory": _vtraj}
 if ft is not None:                                           # full-eval mode only: test fields present
+    print_seed_result(
+        task="regression",
+        seed=args.seed,
+        best_epoch=best_epoch,
+        best_step=best_step,
+        val_value=best,
+        test_value=ft["tau_b"],
+    )
     _summ.update({"final_test_tau": ft["tau_b"], "final_test_acc_mse": ft["acc_mse"],
                   "final_test_accmse_x1e5": ft["acc_mse"] * 1e5, "final_test_accmae": ft["acc_mae"],
                   "finalepoch_test_tau": ff["tau_b"], "finalepoch_test_acc_mse": ff["acc_mse"],
