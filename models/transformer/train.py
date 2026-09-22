@@ -172,6 +172,9 @@ def train_loop(system, train_zoo, val_zoo, max_updates, eval_every, micro=8, eff
     upd, step_in_acc = 0, 0
     g = torch.Generator().manual_seed(seed)              # data order varies by training seed (split fixed elsewhere)
     best_tau, best_state, best_which, hist = -2.0, None, "online", []
+    best_step, best_epoch = 0, 0
+    epoch_num = 1
+    train_started = time.time()
     # §11 full-system EMA: coherent single-trajectory weight average of ALL learned params (generator,
     # codes, embeddings, readout/predictor, heads). Teacher is external (not in system) so
     # never averaged; buffers are left as the online system's (copied, not averaged). Shadow = training overhead.
@@ -188,6 +191,9 @@ def train_loop(system, train_zoo, val_zoo, max_updates, eval_every, micro=8, eff
             torch.cuda.set_rng_state_all(resume["cuda_rng"])
         upd = int(resume["upd"]); best_tau = resume["best_tau"]; best_which = resume["best_which"]
         best_state = resume["best_state"]; hist = list(resume["hist"])
+        best_step = int(resume.get("best_step", upd))
+        best_epoch = int(resume.get("best_epoch", max(1, int((upd * eff) // max(1, len(train_zoo))))))
+        epoch_num = int(resume.get("epoch_num", max(1, best_epoch)))
         norm.mean, norm.std = resume["norm"]["mean"], resume["norm"]["std"]       # train-only stats, as saved
         if ema is not None and resume.get("ema") is not None:
             ema = {n: v.to(dev_) for n, v in resume["ema"].items()}
@@ -202,7 +208,8 @@ def train_loop(system, train_zoo, val_zoo, max_updates, eval_every, micro=8, eff
               "data_rng": g.get_state(), "torch_rng": torch.get_rng_state(),
               "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
               "epoch_perm": perm_, "pos": pos_, "best_tau": best_tau, "best_which": best_which,
-              "best_state": best_state, "hist": hist, "norm": norm.state(),
+              "best_state": best_state, "best_step": best_step, "best_epoch": best_epoch,
+              "epoch_num": epoch_num, "hist": hist, "norm": norm.state(),
               "ema": ({n: v.detach().cpu() for n, v in ema.items()} if ema is not None else None),
               "scaler": None,                                # no AMP/GradScaler in this trainer (fp32 policy)
               "meta": meta}
@@ -259,25 +266,35 @@ def train_loop(system, train_zoo, val_zoo, max_updates, eval_every, micro=8, eff
                         me, _ = run_eval(system, val_zoo, norm, micro=max(32, micro))
                         _load_params(system, online_bak)     # restore online params (buffers untouched)
                         etau = me["kendall_tau"] if me["kendall_tau"] == me["kendall_tau"] else -2
+                    is_best = False
                     if otau > best_tau:                       # BEST-val over {online, EMA} -> one coherent deployed system
                         best_tau, best_which = otau, "online"
+                        best_step, best_epoch = upd, epoch_num
+                        is_best = True
                         best_state = {k: v.detach().cpu().clone() for k, v in system.state_dict().items()}
                     if etau is not None and etau > best_tau:
                         best_tau, best_which = etau, "ema"
+                        best_step, best_epoch = upd, epoch_num
+                        is_best = True
                         sd = {k: v.detach().cpu().clone() for k, v in system.state_dict().items()}
                         for n in ema:
                             sd[n] = ema[n].detach().cpu().clone()          # EMA params + online buffers
                         best_state = sd
                     if sched_when == "eval":
                         sched.step(otau)                     # scheduler follows the ONLINE training metric
-                    lr0 = opt.param_groups[0]["lr"]
-                    emastr = f" ema_tau {etau:.4f}" if etau is not None else ""
-                    log(f"  upd {upd:4d}  val_tau {m['kendall_tau']:.4f}{emastr} val_mae {m['mae']:.4f} "
-                        f"tr_tau {mt['kendall_tau']:.4f} gen_lr {lr0:.2e}")
+                    elapsed = time.time() - train_started
+                    remaining = (elapsed / max(upd, 1)) * max(0, max_updates - upd)
+                    train_loss = loss.item() * eff / max(1, len(idx))
+                    print_eval(
+                        task="regression", step=upd, epoch=epoch_num,
+                        train_loss=train_loss, val_value=m["kendall_tau"], test_value=None,
+                        elapsed=elapsed, remaining=remaining, new_best=is_best,
+                    )
                 if state_every and (upd % state_every == 0 or upd == max_updates or stopped()):
                     _save_state(perm, i + micro)             # next microbatch index of this epoch (exact resume)
                 if upd >= max_updates or stopped():
                     break
+        epoch_num += 1
     if profile and step_times:
         warm = step_times[5:] if len(step_times) > 5 else step_times
         msg = (f"  [profile] {len(step_times)} updates | update time mean {sum(warm)/len(warm)*1e3:.1f} ms "
@@ -289,7 +306,7 @@ def train_loop(system, train_zoo, val_zoo, max_updates, eval_every, micro=8, eff
         best_state = {k: v.detach().cpu().clone() for k, v in system.state_dict().items()}
     if ema is not None:
         log(f"  [select] best val_tau {best_tau:.4f} via {best_which}{'  (EMA won)' if best_which == 'ema' else ''}")
-    return norm, hist, best_tau, best_state
+    return norm, hist, best_tau, best_state, best_step, best_epoch
 
 
 # ---------------- CLI actions ----------------
