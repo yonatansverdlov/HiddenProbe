@@ -24,7 +24,28 @@ if not dirs:
     sys.exit(0)
 dev = "cuda" if torch.cuda.is_available() else "cpu"
 
-# New unified runs store each seed\'s held-out test tau in last.pt.  In the\n# normal summary path we can therefore avoid evaluating the test set a second time.\nif not os.environ.get("TP_SHOW_AUX") and not os.environ.get("TP_THRESH"):\n    stored = []\n    stored_cfg = None\n    for d in dirs:\n        ck = torch.load(os.path.join(d, "last.pt"), map_location="cpu", weights_only=False)\n        if "best_test_tau" not in ck:\n            stored = []\n            break\n        stored.append(float(ck["best_test_tau"]))\n        stored_cfg = stored_cfg or ck["cfg"]\n    if stored and len(stored) == len(dirs):\n        cut = float(stored_cfg.get("cut_off", 0.0))\n        threshold_pct = int(round(cut * 100))\n        dataset_label = f"{str(stored_cfg[\'dataset\']).upper()} Transformer threshold {threshold_pct}%"\n        print_final_summary(\n            method="HiddenProbe", task="regression", dataset=dataset_label, values=stored\n        )\n        sys.exit(0)\n\n\ndef build(a, sd):
+# New unified runs store each seed's held-out test tau in last.pt. In the
+# normal summary path we can therefore avoid evaluating the test set a second time.
+if not os.environ.get("TP_SHOW_AUX") and not os.environ.get("TP_THRESH"):
+    stored = []
+    stored_cfg = None
+    for d in dirs:
+        ck = torch.load(os.path.join(d, "last.pt"), map_location="cpu", weights_only=False)
+        if "best_test_tau" not in ck:
+            stored = []
+            break
+        stored.append(float(ck["best_test_tau"]))
+        stored_cfg = stored_cfg or ck["cfg"]
+    if stored and len(stored) == len(dirs):
+        cut = float(stored_cfg.get("cut_off", 0.0))
+        threshold_pct = int(round(cut * 100))
+        dataset_label = f"{str(stored_cfg['dataset']).upper()} Transformer threshold {threshold_pct}%"
+        print_final_summary(
+            method="HiddenProbe", task="regression", dataset=dataset_label, values=stored
+        )
+        sys.exit(0)
+
+def build(a, sd):
     # FFN read straight from the checkpoint tensor shapes (exact; independent of fit_ffn/ceiling changes).
     ffn = None
     for k in ("predictor.blocks.0.linear1.weight",     # r0
@@ -110,7 +131,13 @@ ens = {i: sum(vs) / len(vs) for i, vs in acc.items()}
 et = tau(ens, trues0)
 threshold_pct = int(round(cut * 100))
 dataset_label = str(a["dataset"]).upper()
-print_final_summary(\n    method="HiddenProbe",\n    task="regression",\n    dataset=f"{dataset_label} Transformer threshold {threshold_pct}%",\n    values=seed_taus,\n)\n
+print_final_summary(
+    method="HiddenProbe",
+    task="regression",
+    dataset=f"{dataset_label} Transformer threshold {threshold_pct}%",
+    values=seed_taus,
+)
+
 # Auxiliary ensemble is intentionally hidden from the normal result summary.
 if os.environ.get("TP_SHOW_AUX"):
     print(f"Auxiliary {n}-model ensemble tau: {et:.4f}")
