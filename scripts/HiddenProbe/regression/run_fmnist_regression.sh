@@ -14,7 +14,9 @@ NUM_SEEDS=5
 OUT_ROOT="${OUT_DIR:-checkpoints}"
 
 ZOO_DIR="${ZOO_DIR:-$DATA_ROOT/regression/fmnist}"
-SPLIT_FLAG=()
+SPLIT="$ZOO_DIR/split.csv"
+[[ -s "$SPLIT" ]] || { echo "missing official NFN split file: $SPLIT"; exit 2; }
+SPLIT_FLAG=(--zoo_split "$SPLIT")
 
 SUMMARIES=()
 for ((SEED=0; SEED<NUM_SEEDS; SEED++)); do
