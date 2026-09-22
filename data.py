@@ -29,7 +29,6 @@ class CIFAR10INRDataset(torch.utils.data.Dataset):
         # Cache models after their first loading.
         self.all_data = [None] * len(self.samples)
 
-        print(f"CIFAR-10 INR {split}: {len(self.samples)} samples")
 
     def __len__(self):
         return len(self.samples)
