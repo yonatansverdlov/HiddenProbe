@@ -15,7 +15,8 @@ OUT_ROOT="${OUT_DIR:-checkpoints}"
 
 WP_DIR="${WP_DIR:-$DATA_ROOT/regression/cifar10_wp}"
 CNN_CACHE="${CNN_CACHE:-$WP_DIR/wp_cnn_cache}"
-SPLITS="$REPO_ROOT/scripts/setup_data/splits/cnn_park_splits.json"
+SPLITS="$WP_DIR/splits.json"
+[[ -s "$SPLITS" ]] || { echo "missing canonical Wild-Park split file: $SPLITS"; exit 2; }
 for s in train val test; do
   [[ -s "$CNN_CACHE/cnn_cache_$s.pt" ]] || { echo "missing $CNN_CACHE/cnn_cache_$s.pt"; exit 2; }
 done
