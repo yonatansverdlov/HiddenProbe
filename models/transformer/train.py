@@ -157,7 +157,7 @@ def train_loop(system, train_zoo, val_zoo, max_updates, eval_every, micro=8, eff
                gen_lr=1e-3, pred_lr=3e-4, scheduler="none", patience=5, factor=0.5,
                weight_decay=1e-3, warmup=0, seed=0, ema_decay=0.0,
                exact_accum=False, state_every=0, state_path=None, resume=None, meta=None, profile=False,
-               stop_after=0, test_zoo=None):
+               stop_after=0):
     """exact_accum: rescale accumulated grads by eff/count when a window holds count != eff models (exact mean over
     the models actually accumulated; partial epoch tails are otherwise over-weighted). state_every/state_path:
     write a resumable training_state.pt every N optimizer updates (model+opt+sched+RNG+data order+best+norm+meta).
@@ -260,9 +260,6 @@ def train_loop(system, train_zoo, val_zoo, max_updates, eval_every, micro=8, eff
                 if upd % eval_every == 0 or upd == max_updates:
                     m, _ = run_eval(system, val_zoo, norm, micro=max(32, micro))         # ONLINE val
                     mt, _ = run_eval(system, train_probe, norm, micro=max(32, micro))    # train-subset (gap curve)
-                    mtest = None
-                    if test_zoo is not None:                                                # reporting only; NEVER selection/scheduler
-                        mtest, _ = run_eval(system, test_zoo, norm, micro=max(32, micro))
                     hist.append((upd, m["kendall_tau"], m["mae"], mt["kendall_tau"], mt["mae"]))
                     otau = m["kendall_tau"] if m["kendall_tau"] == m["kendall_tau"] else -2
                     etau = None
@@ -294,7 +291,7 @@ def train_loop(system, train_zoo, val_zoo, max_updates, eval_every, micro=8, eff
                     print_eval(
                         task="regression", step=upd, epoch=epoch_num,
                         train_loss=train_loss, val_value=m["kendall_tau"],
-                        test_value=(mtest["kendall_tau"] if mtest is not None else None),
+                        test_value=None,
                         elapsed=elapsed, remaining=remaining, new_best=is_best,
                     )
                 if state_every and (upd % state_every == 0 or upd == max_updates or stopped()):
@@ -472,8 +469,7 @@ def cmd_train(a):
                                   weight_decay=a.weight_decay, warmup=a.warmup, seed=a.seed,
                                   ema_decay=(a.ema_decay if a.ema else 0.0),
                                   exact_accum=a.exact_accum, state_every=a.save_state_every, state_path=state_path,
-                                  resume=resume, meta=meta, profile=a.profile, stop_after=a.stop_after,
-                                  test_zoo=te)
+                                  resume=resume, meta=meta, profile=a.profile, stop_after=a.stop_after)
     sys_.load_state_dict(best_state)
     test_metrics, _ = run_eval(sys_, te, norm, micro=max(32, a.micro))
     print_seed_result(
