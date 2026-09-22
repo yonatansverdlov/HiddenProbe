@@ -14,8 +14,8 @@ NUM_SEEDS=5
 OUT_ROOT="${OUT_DIR:-checkpoints}"
 
 ZOO_DIR="${ZOO_DIR:-$DATA_ROOT/regression/svhn}"
-SPLIT="$REPO_ROOT/scripts/setup_data/splits/gs_splits/svhn_split_nfn.csv"
-[[ -s "$SPLIT" ]] || { echo "missing split file: $SPLIT"; exit 2; }
+SPLIT="$ZOO_DIR/split.csv"
+[[ -s "$SPLIT" ]] || { echo "missing official NFN split file: $SPLIT"; exit 2; }
 SPLIT_FLAG=(--zoo_split "$SPLIT")
 
 SUMMARIES=()
