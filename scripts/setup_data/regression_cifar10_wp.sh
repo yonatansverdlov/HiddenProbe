@@ -11,7 +11,7 @@ TARGET="$DATA_ROOT/regression/cifar10_wp"
 ARCHIVE="$TARGET/cnn_wild_park.zip"
 CACHE_DIR="${PGH_WP_CACHE:-$TARGET/wp_cnn_cache}"
 SPLIT_SRC="$SCRIPT_DIR/splits/cnn_park_splits.json"     # shipped with the repository
-SPLIT="$TARGET/cnn_park_splits.json"
+SPLIT="$TARGET/splits.json"
 
 ARCHIVE_URL="https://zenodo.org/records/12797219/files/cnn_wild_park.zip?download=1"
 
@@ -33,7 +33,7 @@ cache_ready() {
     return 0
 }
 
-log "Step 1: installing the shipped split definition."
+log "Step 1: installing the shipped canonical Wild-Park split definition."
 require_file "$SPLIT_SRC"
 cp -f "$SPLIT_SRC" "$SPLIT"
 
