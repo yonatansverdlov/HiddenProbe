@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import statistics
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
+from models.logging_utils import print_final_summary
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dataset", required=True)
@@ -17,9 +21,9 @@ for item in args.summaries:
         summary = json.load(f)
     values.append(float(summary["best_test_acc"]))
 
-mean = statistics.fmean(values)
-std = statistics.stdev(values) if len(values) > 1 else 0.0
-
-print(f"{args.dataset} — {args.model}")
-print(f"Test accuracy: {mean:.4f} ± {std:.4f}")
-print("Seeds: " + ", ".join(f"{v:.4f}" for v in values))
+print_final_summary(
+    method=args.model,
+    task="classification",
+    dataset=args.dataset,
+    values=values,
+)
