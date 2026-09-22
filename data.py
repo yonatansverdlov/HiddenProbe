@@ -487,8 +487,6 @@ def _load_cnns_from_cache(cache_file, limit, dev):
         for k, shape, ne in zip(m["keys"], m["shapes"], m["numels"]):
             sd[k] = flat[o:o + ne].reshape(shape); o += ne
         nets.append(_build_net(m["config"], sd).to(dev)); ys.append(float(scores[i]))
-    print(f"[wp] loaded {os.path.basename(cache_file)}: {N} CNNs from CACHE in {time.time()-t0:.0f}s "
-          f"({N/max(time.time()-t0,1e-6):.0f}/s)", flush=True)
     return nets, torch.tensor(ys)
 
 
@@ -519,9 +517,6 @@ def load_cnns(split, limit=0, dev="cpu", splits_path=DEFAULT_SPLITS, zip_path=No
         for p in net.parameters():
             p.requires_grad_(False)
         nets.append(net.to(dev)); ys.append(float(scores[i]))
-        if (i + 1) % 20000 == 0:
-            print(f"[wp] load {split} {i+1}/{N} ({(i+1)/(time.time()-t0):.0f}/s)", flush=True)
-    print(f"[wp] loaded {split}: {N} CNNs in {time.time()-t0:.0f}s", flush=True)
     return nets, torch.tensor(ys)
 
 
