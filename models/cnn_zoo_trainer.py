@@ -115,7 +115,6 @@ ap.add_argument("--plateau_patience", type=int, default=6)
 ap.add_argument("--plateau_min_lr", type=float, default=1e-5)
 ap.add_argument("--init_kahana_checkpoint", default="", help="load Kahana backbone weights, then joint train")
 ap.add_argument("--seed", type=int, default=0)
-ap.add_argument("--val_subset", type=int, default=1485)
 ap.add_argument("--val_limit", type=int, default=0, help="0=all val CNNs; >0 loads only N (smoke/debug)")
 ap.add_argument("--test_limit", type=int, default=0, help="0=all test CNNs; >0 loads only N (smoke/debug)")
 ap.add_argument("--eval_every", type=int, default=2500)
@@ -365,16 +364,16 @@ def rank_loss(pred, tgt):
 
 
 @torch.no_grad()
-def ev(nets, y, zero_hidden=False, shuffle_hidden=False, nmax=None):
+def ev(nets, y, zero_hidden=False, shuffle_hidden=False):
+    """Evaluate the complete split exactly as loaded; no validation/test subsampling."""
     model.eval(); preds = []
-    n = len(nets) if nmax is None else min(nmax, len(nets))
-    for i in range(0, n, args.eval_cnn_bs):
-        b = nets[i:min(i + args.eval_cnn_bs, n)]        # clip to n (nets may be longer than nmax)
+    for i in range(0, len(nets), args.eval_cnn_bs):
+        b = nets[i:i + args.eval_cnn_bs]
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=(DEV == "cuda")):
             p = model(b, device=DEV, zero_hidden=zero_hidden, shuffle_hidden=shuffle_hidden)
         preds.append(p.float().cpu())
     model.train()
-    return all_metrics(torch.cat(preds), y[:n], space=args.target_space)
+    return all_metrics(torch.cat(preds), y, space=args.target_space)
 
 
 def logrow(r):
@@ -427,7 +426,7 @@ if args.resume_training_state:
         print(f"[RESUME] start_epoch {start_epoch} >= --epochs {args.epochs}: nothing to train.", flush=True)
 STATE_PATH = os.path.join(args.out_dir, "training_state.pt")
 if args.eval_at_init and not args.resume_training_state:
-    vm0 = ev(vaN, vaY, nmax=args.val_subset)                          # score the (warm/nested) init at step 0
+    vm0 = ev(vaN, vaY)                          # score the (warm/nested) init at step 0
     best = vm0["tau_b"]
     best_epoch = 0
     best_step = 0
@@ -468,8 +467,8 @@ for ep in range(start_epoch, args.epochs):
         if args.scheduler == "cosine" and step > args.warmup:          # cosine steps every batch post-warmup
             sched.step()
         if step % args.eval_every == 0:
-            vm = ev(vaN, vaY, nmax=args.val_subset)
-            tm = ev(teN, teY, nmax=args.val_subset)
+            vm = ev(vaN, vaY)
+            tm = ev(teN, teY)
             if args.scheduler == "plateau" and step >= args.warmup:
                 sched.step(vm["tau_b"])
             isb = vm["tau_b"] > best
@@ -504,18 +503,21 @@ for ep in range(start_epoch, args.epochs):
 # ---- checkpoint policy (§8): save FINAL-epoch ckpt + report both final-epoch and best-val test ----
 torch.save({k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
            os.path.join(args.out_dir, "final.pt"))
-fv = ev(vaN, vaY)                                            # ALWAYS eval final-epoch VAL (cheap, uniform metric)
+fv = ev(vaN, vaY)                                            # final-epoch checkpoint, FULL validation
 
-if bstate is not None:                                       # load best-val checkpoint (== best.pt on disk)
-    model.load_state_dict({k: v.to(DEV) for k, v in bstate.items()})
+# Evaluate the final-epoch TEST while the final-epoch weights are still loaded.
+# Only afterwards switch to the best-validation checkpoint and evaluate it.
 ff = ft = None; diag = {}
 if args.skip_test_eval:                                      # TUNING MODE: no test eval, no diagnostics, no dump
-
     args.dump_preds = ""                                     # ensure no test preds are written in tuning mode
 else:
-    ff = ev(teN, teY)                                        # final-epoch checkpoint, full test
-    ft = ev(teN, teY)                                        # best-val checkpoint, full test (reported)
+    ff = ev(teN, teY)                                        # TRUE final-epoch checkpoint, full test
 
+if bstate is not None:                                       # now load best-val checkpoint (== best.pt on disk)
+    model.load_state_dict({k: v.to(DEV) for k, v in bstate.items()})
+
+if not args.skip_test_eval:
+    ft = ev(teN, teY)                                        # best-val checkpoint, full test (reported)
 
     diag = {"tau_full": ft["tau_b"], "mse_full": ft["acc_mse"]}
     if args.hidden_mode == "on":
