@@ -422,7 +422,10 @@ def cmd_train(a):
     va = IN.load_zoo_cached(
         a.data_root, a.dataset, "val", seed=0, cut_off=a.cut_off, limit=a.limit
     )
-    if tr is None or va is None:                       # no cache -> slow per-file path
+    te = IN.load_zoo_cached(
+        a.data_root, a.dataset, "test", seed=0, cut_off=a.cut_off, limit=a.limit
+    )
+    if tr is None or va is None or te is None:         # no cache -> slow per-file path
         print(
             "[train] WARNING: no threshold-specific consolidated cache found -> "
             "per-file load (slow). Run `python main.py transformer cache ... --cut_off ...` first."
@@ -430,13 +433,10 @@ def cmd_train(a):
         man = IN.build_manifest(a.data_root, a.dataset, seed=0, cut_off=a.cut_off)
         tr = IN.load_zoo(man, "train", limit=a.limit)
         va = IN.load_zoo(man, "val", limit=a.limit)
+        te = IN.load_zoo(man, "test", limit=a.limit)
     tr, dtr = _filter_C(tr, cfg.n_classes)
     va, dva = _filter_C(va, cfg.n_classes)
-    print(
-        f"[train] threshold-specific split cut_off={a.cut_off}: "
-        f"train={len(tr)} val={len(va)}"
-    )
-    print(f"[train] {cfg.key} params={sys_.n_trainable():,} | train={len(tr)}(-{dtr} offC) val={len(va)}(-{dva} offC)")
+    te, dte = _filter_C(te, cfg.n_classes)
     assert tr and va, "empty split after C-filter — check --n_classes vs the zoo's classifier dim"
     runs = a.runs_dir or f"checkpoints/tp_{a.dataset}_{a.generator}_s{a.seed}"
     os.makedirs(runs, exist_ok=True)
@@ -445,28 +445,41 @@ def cmd_train(a):
     meta = {"cfg": vars(a), "resolved_ffn": cfg.ffn, "eff_batch": eff, "arch_version": sys_.arch_version,
             "code_rev": _code_rev(), "manifest_hash": _split_hash(tr, va), "split_seed": 0,
             "param_total": sys_.n_trainable(), "components": sys_.component_counts()}
-    print(f"[train] arch_version={meta['arch_version']} code_rev={meta['code_rev']} manifest_hash={meta['manifest_hash']} "
-          f"eff_batch={eff} exact_accum={a.exact_accum}")
+    threshold_pct = int(round(float(a.cut_off) * 100))
+    dataset_label = f"{a.dataset.upper()} Transformer threshold {threshold_pct}%"
+    print_run_config(
+        method="HiddenProbe", task="regression", dataset=dataset_label,
+        seed=a.seed, experiment=os.path.basename(runs.rstrip(os.sep)),
+        train_size=len(tr), val_size=len(va), test_size=len(te),
+        probes=a.n_probes, parameters=sum(p.numel() for p in sys_.parameters()),
+        trainable=sys_.n_trainable(), device=dev,
+    )
     resume = None
     if a.resume_state:
         resume = torch.load(a.resume_state, map_location="cpu", weights_only=False)
         _check_resume_compat(resume.get("meta") or {}, meta); resume["path"] = a.resume_state
     state_path = os.path.join(runs, "training_state.pt") if a.save_state_every > 0 else None
-    norm, hist, best, best_state = train_loop(sys_, tr, va, a.max_updates, eval_every=a.eval_every, micro=a.micro,
+    norm, hist, best, best_state, best_step, best_epoch = train_loop(sys_, tr, va, a.max_updates, eval_every=a.eval_every, micro=a.micro,
                                   eff=eff, gen_lr=a.gen_lr, pred_lr=a.pred_lr,
                                   scheduler=a.scheduler, patience=a.plateau_patience, factor=a.plateau_factor,
                                   weight_decay=a.weight_decay, warmup=a.warmup, seed=a.seed,
                                   ema_decay=(a.ema_decay if a.ema else 0.0),
                                   exact_accum=a.exact_accum, state_every=a.save_state_every, state_path=state_path,
                                   resume=resume, meta=meta, profile=a.profile, stop_after=a.stop_after)
+    sys_.load_state_dict(best_state)
+    test_metrics, _ = run_eval(sys_, te, norm, micro=max(32, a.micro))
+    print_seed_result(
+        task="regression", seed=a.seed, best_epoch=best_epoch, best_step=best_step,
+        val_value=best, test_value=test_metrics["kendall_tau"],
+    )
     torch.save({"state_dict": best_state, "cfg": vars(a), "norm": norm.state(),   # BEST-val checkpoint, not final
-                "best_val_tau": best, "history": hist,
+                "best_val_tau": best, "best_test_tau": test_metrics["kendall_tau"],
+                "best_step": best_step, "best_epoch": best_epoch, "history": hist,
                 "arch_version": meta["arch_version"], "code_rev": meta["code_rev"],
                 "manifest_hash": meta["manifest_hash"],
                 "resolved": {"ffn": cfg.ffn, "eff_batch": eff, "exact_accum": a.exact_accum,
                              "param_total": meta["param_total"], "components": meta["components"]}},
                os.path.join(runs, "last.pt"))
-    print(f"[train] done | best val_tau={best:.4f} | saved {runs}/last.pt")
 
 
 def main():
