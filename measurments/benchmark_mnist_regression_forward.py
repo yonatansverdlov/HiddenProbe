@@ -43,7 +43,7 @@ from models.probegen_h import ProbeGenH
 
 DEFAULT_DATA_DIR = REPO_ROOT / "data" / "regression" / "mnist"
 DEFAULT_SPLIT = (
-    REPO_ROOT / "scripts" / "setup_data" / "splits" / "gs_splits" / "mnist_gs_auto_split.csv"
+    REPO_ROOT / "data" / "regression" / "mnist" / "split.csv"
 )
 
 
@@ -131,7 +131,6 @@ def make_hiddenprobe(n_probes: int) -> ProbeGenH:
 def load_targets(args: argparse.Namespace, device: torch.device):
     nets, _ = load_svhn_cnns(
         "train",
-        activation="relu",
         dev=str(device),
         data_dir=str(args.data_dir),
         split_csv=str(args.split),
