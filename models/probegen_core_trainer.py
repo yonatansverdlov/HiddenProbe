@@ -269,10 +269,6 @@ class CNNZooRegressionDataset(torch.utils.data.Dataset):
         if not np.isfinite(labels).all():
             raise RuntimeError("Non-finite test_accuracy labels found.")
 
-        print(
-            f"[{self.data_path.name}] {split}: {len(self.raw_idcs)} final models "
-            f"(target=test_accuracy)"
-        )
 
     @staticmethod
     def _split_indices_iid(n: int):
