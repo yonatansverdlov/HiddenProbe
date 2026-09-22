@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import statistics
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
+from models.logging_utils import print_final_summary
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dataset", required=True)
@@ -19,9 +23,9 @@ for p in args.summaries:
         raise RuntimeError(f"{path} does not contain final_test_tau")
     taus.append(float(summary["final_test_tau"]))
 
-mean = statistics.fmean(taus)
-std = statistics.stdev(taus) if len(taus) > 1 else 0.0
-
-print(f"{args.dataset} — {args.model}")
-print(f"Test Kendall tau: {mean:.4f} ± {std:.4f}")
-print("Seeds: " + ", ".join(f"{v:.4f}" for v in taus))
+print_final_summary(
+    method=args.model,
+    task="regression",
+    dataset=args.dataset,
+    values=taus,
+)
