@@ -529,8 +529,8 @@ metrics.csv.gz (labels/config) and layout.csv (per-variable flatten layout). Thi
      (dnn_predict_accuracy/train_network.build_cnn): 3x Conv2D(16, k=3, stride=2, VALID, act) + GAP + Dense(10),
      1-channel grayscale input. Feature maps 32->15->7->3.
   2. unflatten_to_state_dict — TF (HWIO conv kernels, (in,out) dense) -> PyTorch (OIHW, (out,in)).
-  3. ScaleGMN split (final checkpoint step==86 -> svhn_split.csv shuffle -> _split_indices_iid 40/10/50 seed0
-     -> activation mask), reproducing src/data/cifar10_dataset.py.
+  3. Official NFN split (fixed permutation -> final checkpoint step==86 -> 40/10/50 split).
+     All target models are retained; each CNN is reconstructed with its own recorded activation.
 Reference: github.com/google-research/google-research/dnn_predict_accuracy ; github.com/jkalogero/scalegmn
 """
 DATA_DIR = ZOO_DIRS["svhn_gs"]
