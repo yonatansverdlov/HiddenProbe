@@ -97,9 +97,6 @@ class CIFAR10INRDataset(torch.utils.data.Dataset):
         elif split == "val":
             expected = test_point - val_point
 
-        print(f"{self.dataset_name} INR {split}: {len(self.samples):,} samples")
-        print(f"  root: {self.root}")
-        print(f"  prefix counts: {self.prefix_counts}")
         if expected is not None and len(self.samples) != expected:
             raise RuntimeError(
                 f"Unexpected {self.dataset_name} INR {split} size: got {len(self.samples):,}, "
