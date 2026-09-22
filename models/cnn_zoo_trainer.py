@@ -364,7 +364,7 @@ def rank_loss(pred, tgt):
 
 
 @torch.no_grad()
-def ev(nets, y, zero_hidden=False, shuffle_hidden=False):
+def ev(nets, y, zero_hidden=False, shuffle_hidden=False, return_preds=False):
     """Evaluate the complete split exactly as loaded; no validation/test subsampling."""
     model.eval(); preds = []
     for i in range(0, len(nets), args.eval_cnn_bs):
@@ -372,8 +372,10 @@ def ev(nets, y, zero_hidden=False, shuffle_hidden=False):
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=(DEV == "cuda")):
             p = model(b, device=DEV, zero_hidden=zero_hidden, shuffle_hidden=shuffle_hidden)
         preds.append(p.float().cpu())
+    pred = torch.cat(preds)
     model.train()
-    return all_metrics(torch.cat(preds), y, space=args.target_space)
+    metrics = all_metrics(pred, y, space=args.target_space)
+    return (metrics, pred) if return_preds else metrics
 
 
 def logrow(r):
@@ -467,8 +469,9 @@ for ep in range(start_epoch, args.epochs):
         if args.scheduler == "cosine" and step > args.warmup:          # cosine steps every batch post-warmup
             sched.step()
         if step % args.eval_every == 0:
+            # Selection protocol: evaluate the FULL validation split only.
+            # The test split is never touched during training.
             vm = ev(vaN, vaY)
-            tm = ev(teN, teY)
             if args.scheduler == "plateau" and step >= args.warmup:
                 sched.step(vm["tau_b"])
             isb = vm["tau_b"] > best
@@ -480,7 +483,7 @@ for ep in range(start_epoch, args.epochs):
                 torch.save(bstate, os.path.join(args.out_dir, "best.pt"))
             logrow(f"{args.exp_name},{step},{opt.param_groups[0]['lr']:.2e},{loss.item():.4f},"
                    f"{vm['tau_b']:.4f},{vm['acc_mse']*1e5:.2f},{vm['acc_mae']:.4f},"
-                   f"{tm['tau_b']:.4f},{tm['acc_mse']*1e5:.2f},{tm['acc_mae']:.4f},{Q},{isb}")
+                   f"nan,nan,nan,{Q},{isb}")
             elapsed = time.time() - _t0
             steps_done_this_run = max(1, step - _timing_start_step)
             sec_per_step = elapsed / steps_done_this_run
@@ -491,7 +494,7 @@ for ep in range(start_epoch, args.epochs):
                 epoch=ep + 1,
                 train_loss=loss.item(),
                 val_value=vm["tau_b"],
-                test_value=tm["tau_b"],
+                test_value=None,
                 elapsed=elapsed,
                 remaining=eta,
                 new_best=isb,
@@ -500,46 +503,36 @@ for ep in range(start_epoch, args.epochs):
     save_training_state(STATE_PATH, model, opt, sched, ep + 1, step, best, bstate,
                         best_epoch=best_epoch, best_step=best_step)
 
-# ---- checkpoint policy (§8): save FINAL-epoch ckpt + report both final-epoch and best-val test ----
+# ---- final protocol: best checkpoint is chosen ONLY by periodic full-VAL evaluations ----------------
+# Keep the last model only as a debugging/resume artifact.  It is NOT evaluated and cannot become "best".
 torch.save({k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
            os.path.join(args.out_dir, "final.pt"))
-fv = ev(vaN, vaY)                                            # final-epoch checkpoint, FULL validation
 
-# Evaluate the final-epoch TEST while the final-epoch weights are still loaded.
-# Only afterwards switch to the best-validation checkpoint and evaluate it.
-ff = ft = None; diag = {}
-if args.skip_test_eval:                                      # TUNING MODE: no test eval, no diagnostics, no dump
-    args.dump_preds = ""                                     # ensure no test preds are written in tuning mode
+if bstate is None:
+    raise RuntimeError(
+        "No best-validation checkpoint exists. Increase training length or reduce --eval_every "
+        "so at least one full validation evaluation occurs."
+    )
+
+# Deploy exactly the best-validation checkpoint.
+model.load_state_dict({k: v.to(DEV) for k, v in bstate.items()})
+
+ft = None
+test_pred = None
+if args.skip_test_eval:
+    args.dump_preds = ""
 else:
-    ff = ev(teN, teY)                                        # TRUE final-epoch checkpoint, full test
+    # TEST IS TOUCHED EXACTLY ONCE in the normal training protocol.
+    ft, test_pred = ev(teN, teY, return_preds=True)
 
-if bstate is not None:                                       # now load best-val checkpoint (== best.pt on disk)
-    model.load_state_dict({k: v.to(DEV) for k, v in bstate.items()})
-
-if not args.skip_test_eval:
-    ft = ev(teN, teY)                                        # best-val checkpoint, full test (reported)
-
-    diag = {"tau_full": ft["tau_b"], "mse_full": ft["acc_mse"]}
-    if args.hidden_mode == "on":
-        z = ev(teN, teY, zero_hidden=True); s = ev(teN, teY, shuffle_hidden=True)
-        diag.update(tau_hidden_zero=z["tau_b"], tau_hidden_shuffle=s["tau_b"],
-                    hidden_zero_drop=ft["tau_b"] - z["tau_b"], hidden_shuffle_drop=ft["tau_b"] - s["tau_b"])
-
-if args.dump_preds:                                          # Stage-3: per-example preds + positive-affine cal
-    @torch.no_grad()
-    def _pe(nets):
-        model.eval(); ps = []
-        for i in range(0, len(nets), args.eval_cnn_bs):
-            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=(DEV == "cuda")):
-                ps.append(model(nets[i:i + args.eval_cnn_bs], device=DEV).float().cpu())
-        return torch.cat(ps).numpy()
-    _vp, _tp = _pe(vaN), _pe(teN); _vt = vaY.detach().cpu().numpy(); _tt = teY.detach().cpu().numpy()
-    _vv = _vp.var(); _a = max(float(np.cov(_vp, _vt, bias=True)[0, 1] / _vv) if _vv > 0 else 1.0, 1e-6)
-    _b = float(_vt.mean() - _a * _vp.mean())                  # fit on VALIDATION ONLY
-    np.savez(args.dump_preds, val_true=_vt, val_pred=_vp, test_true=_tt, test_pred=_tp, affine_a=_a, affine_b=_b)
-    diag.update(cal_affine_a=_a, cal_affine_b=_b,
-                cal_val_mse=float(np.mean((_a * _vp + _b - _vt) ** 2)) * 1e5, cal_val_mae=float(np.mean(np.abs(_a * _vp + _b - _vt))),
-                cal_test_mse=float(np.mean((_a * _tp + _b - _tt) ** 2)) * 1e5, cal_test_mae=float(np.mean(np.abs(_a * _tp + _b - _tt))))
+# Optional prediction dump reuses the single TEST forward above; it never re-runs TEST.
+if args.dump_preds and ft is not None:
+    _, val_pred = ev(vaN, vaY, return_preds=True)
+    _vt = vaY.detach().cpu().numpy()
+    _tt = teY.detach().cpu().numpy()
+    _vp = val_pred.numpy()
+    _tp = test_pred.numpy()
+    np.savez(args.dump_preds, val_true=_vt, val_pred=_vp, test_true=_tt, test_pred=_tp)
 
 # ---- validation trajectory (step, val_tau, lr) read back from log.csv for summary.json ----
 _vtraj = []
@@ -550,15 +543,25 @@ try:
         except Exception: pass
 except Exception:
     pass
-_summ = {"exp": args.exp_name, "seed": args.seed, "queries": Q, "params": rep["total_trainable"],
-         "target_space": args.target_space, "scheduler": args.scheduler,
-         "lr": args.lr, "probe_lr": args.probe_lr, "plateau_factor": args.plateau_factor,
-         "plateau_patience": args.plateau_patience, "plateau_min_lr": args.plateau_min_lr,
-         "skip_test_eval": bool(args.skip_test_eval),
-         "best_val_tau": best,
-         "final_val_tau": fv["tau_b"], "final_val_mse": fv["acc_mse"] * 1e5, "final_val_mae": fv["acc_mae"],
-         "val_trajectory": _vtraj}
-if ft is not None:                                           # full-eval mode only: test fields present
+_summ = {
+    "exp": args.exp_name,
+    "seed": args.seed,
+    "queries": Q,
+    "params": rep["total_trainable"],
+    "target_space": args.target_space,
+    "scheduler": args.scheduler,
+    "lr": args.lr,
+    "probe_lr": args.probe_lr,
+    "plateau_factor": args.plateau_factor,
+    "plateau_patience": args.plateau_patience,
+    "plateau_min_lr": args.plateau_min_lr,
+    "skip_test_eval": bool(args.skip_test_eval),
+    "best_val_tau": best,
+    "best_epoch": best_epoch,
+    "best_step": best_step,
+    "val_trajectory": _vtraj,
+}
+if ft is not None:
     print_seed_result(
         task="regression",
         seed=args.seed,
@@ -567,9 +570,10 @@ if ft is not None:                                           # full-eval mode on
         val_value=best,
         test_value=ft["tau_b"],
     )
-    _summ.update({"final_test_tau": ft["tau_b"], "final_test_acc_mse": ft["acc_mse"],
-                  "final_test_accmse_x1e5": ft["acc_mse"] * 1e5, "final_test_accmae": ft["acc_mae"],
-                  "finalepoch_test_tau": ff["tau_b"], "finalepoch_test_acc_mse": ff["acc_mse"],
-                  "finalepoch_test_accmse_x1e5": ff["acc_mse"] * 1e5, "finalepoch_test_accmae": ff["acc_mae"]})
-_summ.update(diag)
+    _summ.update({
+        "final_test_tau": ft["tau_b"],
+        "final_test_acc_mse": ft["acc_mse"],
+        "final_test_accmse_x1e5": ft["acc_mse"] * 1e5,
+        "final_test_accmae": ft["acc_mae"],
+    })
 json.dump(_summ, open(os.path.join(args.out_dir, "summary.json"), "w"), indent=2)
