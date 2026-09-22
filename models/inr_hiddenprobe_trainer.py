@@ -58,7 +58,7 @@ ap.add_argument("--xlayer_rank", type=int, default=32, help="rank of the cross-l
 ap.add_argument("--head", choices=["neuron_profile", "set_transformer"], default="neuron_profile",
                 help="neuron_profile (default, per-layer pool) | set_transformer (attention-through: all L*H "
                      "neuron tokens + y + CLS in one deep transformer, permutation-invariant over neurons, "
-                     "late CLS readout — no early pooling). nenc controls depth; watch [e2e] head_params.")
+                     "late CLS readout — no early pooling). nenc controls depth.")
 ap.add_argument("--ema_decay", type=float, default=0.0, help="0 = off; >0 (e.g. 0.999) = keep an EMA of "
                 "{head, probe_source} and eval/report with it (zero params, +~0.5-1%%)")
 # ---- probe generator (NEW: learned) ----
@@ -308,7 +308,7 @@ if args.init_ckpt and not args.ensemble_ckpts:           # WARM-START: init live
     st = torch.load(args.init_ckpt, map_location=DEV)
     head.load_state_dict({k: v.to(DEV) for k, v in st["head"].items()})
     PROBE_MOD.load_state_dict({k: v.to(DEV) for k, v in st["probe_source"].items()})
-    print(f"[e2e] warm-start: loaded head+probe_source from {args.init_ckpt}", flush=True)
+    print(f"Warm-start: loaded head+probe_source from {args.init_ckpt}", flush=True)
 # ---- EMA of {head, probe_source} (eval/report with it) ----  (seeds from warm-started weights if --init_ckpt)
 ema = None
 if args.ema_decay > 0:
