@@ -130,8 +130,8 @@ ap.add_argument("--zoo", default="wp", choices=["wp", "svhn_gs", "cifar_gs", "mn
                 help="wp=CIFAR/Wild-Park (data.load_cnns); *_gs=Unterthiner SmallCNN Zoo (svhn/cifar/mnist/fmnist grayscale), "
                      "loaded via data.load_svhn_cnns (identical 4970-dim SmallCNN, only the training data differs).")
 ap.add_argument("--zoo_data_dir", default="", help="override the SmallCNN-zoo data dir for a *_gs zoo (weights.npy/metrics.csv.gz/layout.csv).")
-ap.add_argument("--zoo_split", default="", help="override the split csv filename for a *_gs zoo (e.g. svhn_split_nfn.csv). Auto-generated seeded permutation if absent.")
-ap.add_argument("--activation", default="relu", choices=["relu", "tanh"], help="svhn_gs only: which activation subset (ScaleGMN benches ReLU=0.8689, Tanh=0.8736)")
+ap.add_argument("--zoo_split", default="", help="official NFN split CSV for a *_gs zoo. If omitted, use <zoo_data_dir>/split.csv. Missing splits are an error; they are never auto-generated.")
+ap.add_argument("--activation", default="", help="deprecated compatibility flag; ignored. *_gs runs always use all target CNNs with each model's recorded activation.")
 ap.add_argument("--dataset_name", default="", help="label printed at startup (e.g. SVHN); hard-fails if it "
                 "is SVHN but --splits looks like a CIFAR/Wild-Park path (leakage guard).")
 ap.add_argument("--exp_name", required=True); ap.add_argument("--out_dir", required=True)
@@ -234,19 +234,19 @@ LOG = os.path.join(args.out_dir, "log.csv")
 # Unterthiner SmallCNN grayscale zoos (all share the 4970-dim fixed CNN; only data_dir + split differ).
 from data import ZOO_DIRS as _ZOO_DIRS   # portable, env-overridable (see data.py)
 _SMALLCNN_ZOOS = {
-    "svhn_gs":  (_ZOO_DIRS["svhn_gs"],  "svhn_split.csv"),
-    "cifar_gs": (_ZOO_DIRS["cifar_gs"], "cifar_gs_split.csv"),
-    "mnist_gs": (_ZOO_DIRS["mnist_gs"], "mnist_split.csv"),
-    "fmnist_gs":(_ZOO_DIRS["fmnist_gs"],"fashion_mnist_split.csv"),
+    "svhn_gs":   (_ZOO_DIRS["svhn_gs"],   "split.csv"),
+    "cifar_gs":  (_ZOO_DIRS["cifar_gs"],  "split.csv"),
+    "mnist_gs":  (_ZOO_DIRS["mnist_gs"],  "split.csv"),
+    "fmnist_gs": (_ZOO_DIRS["fmnist_gs"], "split.csv"),
 }
 if args.zoo in _SMALLCNN_ZOOS:
     from data import load_svhn_cnns
     _ddir, _dsplit = _SMALLCNN_ZOOS[args.zoo]
     _ddir = args.zoo_data_dir or _ddir
     _dsplit = args.zoo_split or _dsplit
-    trN, trY = load_svhn_cnns("train", args.activation, DEV, data_dir=_ddir, split_csv=_dsplit, limit=args.n_train)
-    vaN, vaY = load_svhn_cnns("val", args.activation, DEV, data_dir=_ddir, split_csv=_dsplit, limit=args.val_limit)
-    teN, teY = load_svhn_cnns("test", args.activation, DEV, data_dir=_ddir, split_csv=_dsplit, limit=args.test_limit)
+    trN, trY = load_svhn_cnns("train", dev=DEV, data_dir=_ddir, split_csv=_dsplit, limit=args.n_train)
+    vaN, vaY = load_svhn_cnns("val", dev=DEV, data_dir=_ddir, split_csv=_dsplit, limit=args.val_limit)
+    teN, teY = load_svhn_cnns("test", dev=DEV, data_dir=_ddir, split_csv=_dsplit, limit=args.test_limit)
 else:
     zp = args.zip or None
     _cc = args.cnn_cache or None
