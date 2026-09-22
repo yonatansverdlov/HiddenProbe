@@ -5,6 +5,7 @@ import ast
 import json
 import os
 import random
+import time
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +16,7 @@ import torch.nn.functional as F
 from scipy.stats import kendalltau
 
 from models.probegen_core import ProbeGen
+from models.logging_utils import print_run_config, print_eval, print_seed_result, print_final_summary
 from data_probegen import CIFAR10INRDataset, INRDataset, CNN_Park_ModelData
 
 
@@ -54,11 +56,6 @@ def count_params(model):
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     non_trainable = total - trainable
-
-    print(f"Total params:       {total:,}")
-    print(f"Trainable params:   {trainable:,}")
-    print(f"Non-trainable:      {non_trainable:,}")
-
     return total, trainable, non_trainable
 
 
@@ -859,13 +856,6 @@ def run_one_seed(args, seed, exp_dir):
     test_set = ds["test"]
     task = ds["task"]
 
-    print(
-        f"Train set: {len(train_set)}, "
-        f"Val set: {len(val_set)}, "
-        f"Test set: {len(test_set)}"
-    )
-    print(f"Task: {task}")
-
     train_loader = torch.utils.data.DataLoader(
         train_set,
         batch_size=args.batch_size,
@@ -889,16 +879,6 @@ def run_one_seed(args, seed, exp_dir):
         num_workers=args.n_workers,
         pin_memory=False,
         collate_fn=collate_fn,
-    )
-
-    print(
-        "Model config: "
-        f"gen_type={args.gen_type}, "
-        f"n_probes={args.n_probes}, "
-        f"d_hid={args.d_hid}, "
-        f"generator_width={args.generator_width}, "
-        f"include_hidden_features={args.include_hidden_features}, "
-        f"n_hidden_target_layers={ds['n_hidden_target_layers']}"
     )
 
     model = ProbeGen(
@@ -926,18 +906,20 @@ def run_one_seed(args, seed, exp_dir):
 
     total_params, trainable_params, _ = count_params(model)
 
-    print("Parameter breakdown:")
-    for name in [
-        "probe_source",
-        "hidden_aggregators",
-        "per_probe_mlp",
-        "points_mixer",
-    ]:
-        module = getattr(model, name, None)
-        if module is not None:
-            n = sum(p.numel() for p in module.parameters())
-            print(f"  {name:20s}: {n:,}")
-    print(f"  {'TOTAL':20s}: {total_params:,}")
+    print_run_config(
+        method="ProbeGen" if args.method == "probegen" else "HiddenProbe",
+        task=task,
+        dataset=args.dataset.upper().replace("_", "-"),
+        seed=seed,
+        experiment=args.exp_name,
+        train_size=len(train_set),
+        val_size=len(val_set),
+        test_size=len(test_set),
+        probes=args.n_probes,
+        parameters=total_params,
+        trainable=trainable_params,
+        device=str(device),
+    )
 
     meta = {
         "seed": seed,
@@ -1100,6 +1082,8 @@ def run_one_seed(args, seed, exp_dir):
 
     global_step = 0
     best_val_metric = -float("inf")
+    total_steps = args.epochs * len(train_loader)
+    train_started = time.time()
     best_ckpt_path = os.path.join(exp_dir, "best_checkpoint.pth")
 
     if task == "regression":
@@ -1175,22 +1159,20 @@ def run_one_seed(args, seed, exp_dir):
                 best_ckpt_path,
             )
 
-            if announce_best:
-                print(
-                    f"step={step} epoch={epoch} NEW_BEST "
-                    f"{metric_label}={best_val_metric:.6f} "
-                    f"lr={current_lr():.2e}"
-                )
+        elapsed = time.time() - train_started
+        remaining = (elapsed / max(step, 1)) * max(0, total_steps - step)
 
         if task == "regression":
-            print(
-                f"EVAL step={step} epoch={epoch} "
-                f"train_loss={train_loss:.6f} "
-                f"val_loss={val_results['loss']:.6f} "
-                f"test_loss={test_results['loss']:.6f} "
-                f"val_tau={val_results['tau']:.6f} "
-                f"test_tau={test_results['tau']:.6f} "
-                f"lr={current_lr():.2e}"
+            print_eval(
+                task=task,
+                step=step,
+                epoch=epoch + 1,
+                train_loss=train_loss,
+                val_value=val_results["tau"],
+                test_value=test_results["tau"],
+                elapsed=elapsed,
+                remaining=remaining,
+                new_best=is_best,
             )
             return {
                 "exp_name": args.exp_name,
@@ -1205,14 +1187,16 @@ def run_one_seed(args, seed, exp_dir):
                 "is_best": is_best,
             }
 
-        print(
-            f"EVAL step={step} epoch={epoch} "
-            f"train_loss={train_loss:.6f} "
-            f"val_loss={val_results['loss']:.6f} "
-            f"test_loss={test_results['loss']:.6f} "
-            f"val_acc={val_results['acc']:.6f} "
-            f"test_acc={test_results['acc']:.6f} "
-            f"lr={current_lr():.2e}"
+        print_eval(
+            task=task,
+            step=step,
+            epoch=epoch + 1,
+            train_loss=train_loss,
+            val_value=val_results["acc"],
+            test_value=test_results["acc"],
+            elapsed=elapsed,
+            remaining=remaining,
+            new_best=is_best,
         )
         return {
             "exp_name": args.exp_name,
@@ -1345,18 +1329,15 @@ def run_one_seed(args, seed, exp_dir):
         index=False,
     )
 
-    print("\n========== Best checkpoint results ==========")
-    print(f"Seed: {seed}")
-    print(f"Best epoch: {ckpt['epoch']}")
-    print(f"Best global step: {ckpt['global_step']}")
-
     if task == "regression":
-        print(f"Best val Kendall tau:  {best_val_results['tau']:.6f}")
-        print(f"Best test Kendall tau: {best_test_results['tau']:.6f}")
-        print(f"Best val loss:         {best_val_results['loss']:.6f}")
-        print(f"Best test loss:        {best_test_results['loss']:.6f}")
-        print("============================================\n")
-
+        print_seed_result(
+            task=task,
+            seed=seed,
+            best_epoch=ckpt["epoch"] + 1,
+            best_step=ckpt["global_step"],
+            val_value=best_val_results["tau"],
+            test_value=best_test_results["tau"],
+        )
         return {
             "seed": seed,
             "exp_dir": exp_dir,
@@ -1369,11 +1350,14 @@ def run_one_seed(args, seed, exp_dir):
             "best_test_loss": best_test_results["loss"],
         }
 
-    print(f"Best val accuracy:  {best_val_results['acc']:.6f}")
-    print(f"Best test accuracy: {best_test_results['acc']:.6f}")
-    print(f"Best val loss:      {best_val_results['loss']:.6f}")
-    print(f"Best test loss:     {best_test_results['loss']:.6f}")
-    print("============================================\n")
+    print_seed_result(
+        task=task,
+        seed=seed,
+        best_epoch=ckpt["epoch"] + 1,
+        best_step=ckpt["global_step"],
+        val_value=best_val_results["acc"],
+        test_value=best_test_results["acc"],
+    )
 
     return {
         "seed": seed,
@@ -1432,22 +1416,19 @@ def main():
     summary_csv = os.path.join(base_exp_dir, "seeds_summary.csv")
     summary_df.to_csv(summary_csv, index=False)
 
-    dataset_label = args.dataset.upper()
+    dataset_label = args.dataset.upper().replace("_", "-")
     model_label = "ProbeGen" if args.method == "probegen" else "HiddenProbe"
-
-    print()
-    print(f"{dataset_label} — {model_label}")
-    if args.task == "regression":
-        test_mean, test_std = mean_std(summary_df["best_test_tau"].values)
-        vals = summary_df["best_test_tau"].values
-        print(f"Test Kendall tau: {test_mean:.4f} ± {test_std:.4f}")
-        print("Seeds: " + ", ".join(f"{v:.4f}" for v in vals))
-    else:
-        test_mean, test_std = mean_std(summary_df["best_test_acc"].values)
-        vals = summary_df["best_test_acc"].values
-        print(f"Test accuracy: {test_mean:.4f} ± {test_std:.4f}")
-        print("Seeds: " + ", ".join(f"{v:.4f}" for v in vals))
-    print()
+    vals = (
+        summary_df["best_test_tau"].values
+        if args.task == "regression"
+        else summary_df["best_test_acc"].values
+    )
+    print_final_summary(
+        method=model_label,
+        task=args.task,
+        dataset=dataset_label,
+        values=vals,
+    )
 
 
 if __name__ == "__main__":
