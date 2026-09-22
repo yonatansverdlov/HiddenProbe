@@ -27,6 +27,7 @@ sys.path.insert(0, ROOT)   # so data.py and the models/ package import WITHOUT n
 from models.lowrank import make_linear
 from models.probegen_utils import LowRankEncoderLayer, find_hidden_linear_layers, run_with_linear_activation_hooks
 from models.hiddenprobe_probe_source import LearnedProbeSource
+from models.logging_utils import print_run_config, print_eval, print_seed_result
 from data import INRDataset
 
 NP = 128
@@ -102,8 +103,6 @@ SPLITS_JSON = args.splits if args.splits.endswith(".json") else args.splits + ".
 RUNS_DIR = args.runs_dir or os.path.join(ROOT, "experiments", args.dataset, "runs")
 EXP = os.path.join(RUNS_DIR, args.exp_name); os.makedirs(EXP, exist_ok=True)
 LOG = os.path.join(EXP, "log.csv")
-print(f"[e2e] repo_root={ROOT}", flush=True)
-print(f"[e2e] dataset_dir={DS_DIR}  splits={SPLITS_JSON}  runs_dir={RUNS_DIR}", flush=True)
 
 
 # ---- trainable probe generator (NOT frozen, NOT cached) ----
@@ -145,8 +144,6 @@ def load_split(split):
         net, label = ds[i]
         for p in net.parameters(): p.requires_grad_(False)
         nets.append(net.to(DEV).eval()); ys.append(int(label))
-        if (j + 1) % 20000 == 0: print(f"[e2e] preload {split} {j+1}/{len(idx)} ({(j+1)/(time.time()-t0):.0f}/s)", flush=True)
-    print(f"[e2e] {split}: {len(nets)} INRs on GPU in {time.time()-t0:.0f}s", flush=True)
     return nets, torch.tensor(ys, device=DEV)
 
 
@@ -291,9 +288,22 @@ else:
                             cross_layer=bool(args.cross_layer), xlayer_rank=args.xlayer_rank,
                             ).to(DEV)
 Ph = sum(p.numel() for p in head.parameters())
-print(f"[e2e] {args.exp_name} head_params={Ph:,} + learned_probe_params={n_probe_params:,} = {Ph+n_probe_params:,} "
-      f"(domain_tanh={bool(args.domain_tanh)} probe_lr={args.probe_lr} "
-      f"cross_layer={bool(args.cross_layer)} ema_decay={args.ema_decay})", flush=True)
+if not args.ensemble_ckpts:
+    display_dataset = "CIFAR10" if "noaug" in SPLITS_JSON.lower() else "CIFAR10-AUG"
+    print_run_config(
+        method="HiddenProbe",
+        task="classification",
+        dataset=display_dataset,
+        seed=args.seed,
+        experiment=args.exp_name,
+        train_size=len(trN),
+        val_size=len(vaN),
+        test_size=len(teN),
+        probes=NP,
+        parameters=Ph + n_probe_params,
+        trainable=Ph + n_probe_params,
+        device=DEV,
+    )
 if args.init_ckpt and not args.ensemble_ckpts:           # WARM-START: init live weights from a saved best.pt
     st = torch.load(args.init_ckpt, map_location=DEV)
     head.load_state_dict({k: v.to(DEV) for k, v in st["head"].items()})
@@ -362,6 +372,7 @@ def log(r):
         fp.write(r + "\n")
 
 N = len(trN); step = 0; best = 0.0; t0 = time.time(); best_state = None
+best_epoch = 0; best_step = 0
 for ep in range(args.epochs):
     perm = torch.randperm(N)
     for bi in range(0, N, args.batch_size):
@@ -394,18 +405,40 @@ for ep in range(args.epochs):
             isb = va > best
             if isb:
                 best = va
+                best_epoch = ep + 1
+                best_step = step
                 src_h = ema["head"] if ema is not None else head.state_dict()   # save the EMA snapshot when on
                 src_p = ema["probe_source"] if ema is not None else PROBE_MOD.state_dict()
                 best_state = {"head": {k: v.detach().cpu().clone() for k, v in src_h.items()},
                               "probe_source": {k: v.detach().cpu().clone() for k, v in src_p.items()}}
                 torch.save(best_state, os.path.join(EXP, "best.pt"))
             log(f"{args.exp_name},{ep},{step},{opt.param_groups[0]['lr']:.2e},{opt.param_groups[1]['lr']:.2e},{loss.item():.4f},{va:.4f},{te:.4f},{isb}")
-            print(f"[e2e] step={step} ({step/(time.time()-t0):.2f}/s) loss={loss.item():.3f} val={va:.4f} test={te:.4f} best={best:.4f}", flush=True)
+            elapsed = time.time() - t0
+            remaining = (elapsed / max(step, 1)) * max(0, total_steps - step)
+            print_eval(
+                task="classification",
+                step=step,
+                epoch=ep + 1,
+                train_loss=loss.item(),
+                val_value=va,
+                test_value=te,
+                elapsed=elapsed,
+                remaining=remaining,
+                new_best=isb,
+            )
 if best_state is not None:
     head.load_state_dict({k: v.to(DEV) for k, v in best_state["head"].items()})
     PROBE_MOD.load_state_dict({k: v.to(DEV) for k, v in best_state["probe_source"].items()})
 fva = ev(vaN, vaY, swap_ema=False); fte = ev(teN, teY, swap_ema=False)   # best_state already holds the EMA snapshot
 log(f"FINAL,{args.epochs},{step},,,,{fva:.4f},{fte:.4f},best")
+print_seed_result(
+    task="classification",
+    seed=args.seed,
+    best_epoch=best_epoch,
+    best_step=best_step,
+    val_value=fva,
+    test_value=fte,
+)
 json.dump(
     {
         "exp": args.exp_name,
