@@ -534,7 +534,12 @@ metrics.csv.gz (labels/config) and layout.csv (per-variable flatten layout). Thi
 Reference: github.com/google-research/google-research/dnn_predict_accuracy ; github.com/jkalogero/scalegmn
 """
 DATA_DIR = ZOO_DIRS["svhn_gs"]
-_ACT = {"relu": F.relu, "tanh": torch.tanh}
+_ACT = {
+    "relu": F.relu,
+    "tanh": torch.tanh,
+    "sigmoid": torch.sigmoid,
+    "selu": F.selu,
+}
 # layout varname -> (pytorch state-dict prefix, kind). Uses the .layers/.fc interface capture_features needs.
 _MAP = {"sequential/conv2d/kernel:0": ("layers.0", "convk"), "sequential/conv2d/bias:0": ("layers.0", "b"),
         "sequential/conv2d_1/kernel:0": ("layers.1", "convk"), "sequential/conv2d_1/bias:0": ("layers.1", "b"),
@@ -607,49 +612,106 @@ def reference_forward(flat, x, activation, layout_df):
     return out, (h1, h2, h3)
 
 
-def make_split(data_dir=DATA_DIR, split_csv="svhn_split.csv", seed=0):
-    """Reproduce the ScaleGMN split. Returns dict split->(row_indices into weights.npy, scores, activations).
-    If <split_csv> absent, generate a seeded permutation (documented reproduction) and save it."""
+def make_split(data_dir=DATA_DIR, split_csv="split.csv"):
+    """Return the official NFN 40/10/50 split over final Small-CNN-Zoo checkpoints.
+
+    The split permutation MUST already exist. We never auto-generate a replacement:
+    all methods must consume the same official NFN split file.
+
+    Returns dict split -> rows/scores/activation, where rows are indices into
+    weights.npy and activation is the per-target activation recorded in metrics.csv.gz.
+    """
     metrics = pd.read_csv(os.path.join(data_dir, "metrics.csv.gz"), compression="gzip")
-    N = len(metrics)
-    scsv = os.path.join(data_dir, split_csv)
-    if not os.path.exists(scsv):
-        rng = np.random.RandomState(seed); perm = rng.permutation(N)
-        pd.Series(perm).to_csv(scsv, header=False, index=False)
-    shuffled = pd.read_csv(scsv, header=None).values.flatten()
-    order = shuffled                                     # row order over all N checkpoint rows
+    n_rows = len(metrics)
+
+    scsv = split_csv if os.path.isabs(split_csv) else os.path.join(data_dir, split_csv)
+    if not os.path.isfile(scsv):
+        raise FileNotFoundError(
+            f"Missing official NFN split file: {scsv}. "
+            "Run the matching scripts/setup_data/regression_*.sh script."
+        )
+
+    shuffled = (
+        pd.read_csv(scsv, header=None)
+        .values.flatten()
+        .astype(np.int64)
+    )
+
+    # NFN split CSVs can contain one extra leading 0 line. Mirror the canonical
+    # ProbeGen loader exactly: drop ONLY that leading row when the file is N+1.
+    if len(shuffled) == n_rows + 1:
+        shuffled = shuffled[1:]
+
+    if len(shuffled) != n_rows:
+        raise RuntimeError(
+            f"Official NFN split has {len(shuffled)} rows but metrics has {n_rows} rows: {scsv}"
+        )
+    if shuffled.min() < 0 or shuffled.max() >= n_rows:
+        raise RuntimeError(f"Official NFN split contains out-of-range indices: {scsv}")
+
+    order = shuffled
     m = metrics.iloc[order].reset_index(drop=True)
-    isfinal = (m["step"] == 86).values
-    finals_rows = order[isfinal]                         # weights.npy row idx of finals, in shuffled order
-    mf = m[isfinal].reset_index(drop=True)
-    n = len(mf); tp = int(0.5 * n)
+
+    # NFN protocol: final checkpoints only.
+    isfinal = (m["step"] == 86).to_numpy()
+    finals_rows = order[isfinal]
+    mf = m.loc[isfinal].reset_index(drop=True)
+
+    # NFN protocol: second half test; first half -> fixed-seed 80/20 train/val.
+    n = len(mf)
+    test_split_point = int(0.5 * n)
+    test = list(range(test_split_point, n))
+    trainval = list(range(test_split_point))
+    val_point = int(0.8 * len(trainval))
     import random as _r
-    test = list(range(tp, n)); trainval = list(range(tp)); vp = int(0.8 * len(trainval))
-    _r.Random(0).shuffle(trainval); train = trainval[:vp]; val = trainval[vp:]
+    _r.Random(0).shuffle(trainval)
+    train = trainval[:val_point]
+    val = trainval[val_point:]
+
     out = {}
     for name, idcs in (("train", train), ("val", val), ("test", test)):
-        rows = finals_rows[idcs]; acts = mf["config.activation"].values[idcs]
-        scores = mf["test_accuracy"].values[idcs]
-        out[name] = {"rows": rows, "scores": scores, "activation": acts}
+        idcs = np.asarray(idcs, dtype=np.int64)
+        out[name] = {
+            "rows": finals_rows[idcs],
+            "scores": mf["test_accuracy"].to_numpy()[idcs],
+            "activation": mf["config.activation"].astype(str).to_numpy()[idcs],
+        }
     return out
 
 
-def load_svhn_cnns(split, activation="relu", dev="cpu", data_dir=DATA_DIR, split_csv="svhn_split.csv", limit=0):
-    """Return (nets, scores) for a split+activation: nets=list of frozen runnable SmallCNN, scores=test_accuracy.
-    Mirrors load_cnns (WP loader above) so the trainers can consume it identically. NO CIFAR weights are used."""
+def load_svhn_cnns(split, activation=None, dev="cpu", data_dir=DATA_DIR, split_csv="split.csv", limit=0):
+    """Load ALL target CNNs from an official NFN Small-CNN-Zoo split.
+
+    The activation argument is retained only for backward call compatibility and is
+    intentionally ignored. No activation filtering is performed. Each target CNN is
+    reconstructed with its own config.activation value from metrics.csv.gz.
+    """
     lay = load_layout(data_dir)
     W = np.load(os.path.join(data_dir, "weights.npy"), mmap_mode="r")
     sp = make_split(data_dir, split_csv)[split]
-    mask = sp["activation"] == activation
-    rows = sp["rows"][mask]; scores = sp["scores"][mask].astype(np.float32)
+
+    rows = sp["rows"]
+    scores = sp["scores"].astype(np.float32)
+    activations = sp["activation"]
+
     if limit and limit > 0:
-        rows = rows[:limit]; scores = scores[:limit]
+        rows = rows[:limit]
+        scores = scores[:limit]
+        activations = activations[:limit]
+
     nets = []
-    for ri in rows:
-        m = build_cnn(np.array(W[int(ri)], dtype=np.float32), activation, lay)
+    for ri, act in zip(rows, activations):
+        act = str(act).lower()
+        if act not in _ACT:
+            raise ValueError(
+                f"Unsupported Small-CNN-Zoo activation {act!r} at weights row {int(ri)}. "
+                f"Supported activations: {sorted(_ACT)}"
+            )
+        m = build_cnn(np.array(W[int(ri)], dtype=np.float32), act, lay)
         for p in m.parameters():
-            p.requires_grad_(False)                      # target CNNs are frozen
+            p.requires_grad_(False)
         nets.append(m.to(dev))
+
     return nets, torch.tensor(scores)
 
 
