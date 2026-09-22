@@ -1401,14 +1401,6 @@ def main():
         else:
             exp_dir = os.path.join(base_exp_dir, f"seed_{run_seed}")
 
-        print("\n" + "=" * 80)
-        print(
-            f"Running seed {run_seed} "
-            f"({seed_idx + 1}/{args.num_seeds})"
-        )
-        print(f"Experiment directory: {exp_dir}")
-        print("=" * 80 + "\n")
-
         result = run_one_seed(args, run_seed, exp_dir)
         results.append(result)
 
