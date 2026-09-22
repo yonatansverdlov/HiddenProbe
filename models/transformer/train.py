@@ -174,7 +174,6 @@ def train_loop(system, train_zoo, val_zoo, max_updates, eval_every, micro=8, eff
     best_tau, best_state, best_which, hist = -2.0, None, "online", []
     best_step, best_epoch = 0, 0
     epoch_num = 1
-    train_started = time.time()
     # §11 full-system EMA: coherent single-trajectory weight average of ALL learned params (generator,
     # codes, embeddings, readout/predictor, heads). Teacher is external (not in system) so
     # never averaged; buffers are left as the online system's (copied, not averaged). Shadow = training overhead.
@@ -199,6 +198,9 @@ def train_loop(system, train_zoo, val_zoo, max_updates, eval_every, micro=8, eff
             ema = {n: v.to(dev_) for n, v in resume["ema"].items()}
         resume_perm, resume_pos = resume.get("epoch_perm"), int(resume.get("pos", 0))
         log(f"  [resume] continuing at upd {upd} (best val_tau {best_tau:.4f}) from {resume.get('path', '?')}")
+
+    timing_start_upd = upd
+    train_started = time.time()
 
     def _save_state(perm_, pos_):
         if not state_path:
@@ -286,7 +288,8 @@ def train_loop(system, train_zoo, val_zoo, max_updates, eval_every, micro=8, eff
                     if sched_when == "eval":
                         sched.step(otau)                     # scheduler follows the ONLINE training metric
                     elapsed = time.time() - train_started
-                    remaining = (elapsed / max(upd, 1)) * max(0, max_updates - upd)
+                    steps_this_run = max(1, upd - timing_start_upd)
+                    remaining = (elapsed / steps_this_run) * max(0, max_updates - upd)
                     train_loss = loss.item() * eff / max(1, len(idx))
                     print_eval(
                         task="regression", step=upd, epoch=epoch_num,
