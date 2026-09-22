@@ -35,7 +35,7 @@ for ((SEED=0; SEED<NUM_SEEDS; SEED++)); do
     --gen_type deep_linear_5 --adapter_preset compact --interaction_rank 32 --mixer_hidden 256 --hidden_dim 0 \
     --n_probes "$N_PROBES" --lr "$LR" --probe_lr "$PROBE_LR" --batch_size 32 --rank_loss_w 0.0 --warmup 0 --grad_clip 0 \
     --scheduler plateau --plateau_factor 0.5 --plateau_patience 4 --plateau_min_lr 3e-5 --probe_min_lr 3e-6 \
-    --epochs 18 --sched_total_epochs 30 --n_train 0 --eval_every 1500 --val_subset 1485 --eval_cnn_bs 256 \
+    --epochs 18 --sched_total_epochs 30 --n_train 0 --eval_every 1500 --eval_cnn_bs 256 \
     --seed "$SEED" --exp_name "$EXP_NAME" --out_dir "$SEED_OUT_DIR" --dump_preds "$SEED_OUT_DIR/preds.npz"
 
   SUMMARIES+=("$SEED_OUT_DIR/summary.json")
