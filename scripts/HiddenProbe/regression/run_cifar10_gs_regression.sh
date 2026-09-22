@@ -31,7 +31,7 @@ for ((SEED=0; SEED<NUM_SEEDS; SEED++)); do
     --adapter_preset compact --interaction_rank 32 --mixer_hidden 256 --hidden_dim 0 \
     --n_probes "$N_PROBES" --lr 3e-4 --probe_lr 6e-4 --batch_size 32 --rank_loss_w 0.0 --warmup 0 --grad_clip 0 --n_train 0 \
     --scheduler plateau --plateau_factor 0.5 --plateau_patience 4 --plateau_min_lr 3e-5 \
-    --epochs 150 --eval_every 500 --val_subset 1485 --eval_cnn_bs 256 \
+    --epochs 150 --eval_every 500 --eval_cnn_bs 256 \
     --seed "$SEED" --exp_name "$EXP_NAME" --out_dir "$SEED_OUT_DIR"
 
   SUMMARIES+=("$SEED_OUT_DIR/summary.json")
