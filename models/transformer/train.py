@@ -17,6 +17,7 @@ from models.transformer import intake as IN
 from models.transformer.system import LearnedSystem, TPConfig, PARAM_CEILING, fit_ffn
 from models.transformer.readout_channeltraj import CT_FFN                # channel_trajectory v1: fixed FFN (no auto-fit)
 from models.transformer.acquire import predict
+from models.logging_utils import print_run_config, print_eval, print_seed_result
 try:
     from scipy.stats import kendalltau, spearmanr
 except Exception:
@@ -394,7 +395,7 @@ def cmd_train(a):
     sys_ = LearnedSystem(cfg)
     assert sys_.n_trainable() <= PARAM_CEILING, f"over {PARAM_CEILING:,} param ceiling"
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    sys_.to(dev); print(f"[train] device={dev} (cuda_avail={torch.cuda.is_available()})")
+    sys_.to(dev)
     assert a.data_root and os.path.isdir(a.data_root), f"--data_root missing: {a.data_root!r}"
     # SPLIT IS FIXED (seed 0) for every training seed — else multi-seed runs get shifted partitions that leak
     # into the seed-0 test set used at eval. Training seed only varies model init + data order, never the split.
