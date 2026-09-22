@@ -346,7 +346,7 @@ def cmd_smoke(a):
     norm0 = Norm([z["label"] for z in tr])
     pre, _ = run_eval(sys_, tr, norm0, micro=4)              # random-init baseline on the SAME set
     t0 = time.time()
-    _, hist, best, _ = train_loop(sys_, tr, tr, a.max_updates, eval_every=max(1, a.max_updates // 5), micro=4, eff=8,
+    _, hist, best, _, _, _ = train_loop(sys_, tr, tr, a.max_updates, eval_every=max(1, a.max_updates // 5), micro=4, eff=8,
                                   ema_decay=(a.ema_decay if a.ema else 0.0))    # smoke --ema exercises the §11 path
     dt = time.time() - t0
     print(f"[smoke] {dt:.1f}s  TRAIN-set tau {pre['kendall_tau']:.3f} (init) -> {best:.3f} (best)  "
