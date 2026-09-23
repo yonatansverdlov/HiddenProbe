@@ -1,159 +1,80 @@
 #!/usr/bin/env python3
-"""INR-only forward-time benchmark (no regression) for MNIST and Fashion-MNIST.
+"""MNIST INR classification forward-time benchmark (no regression).
 
-Uses original DWSNets DWS/MLP modules and original NFN modules installed at:
-  third_party/benchmarks/DWSNets
-  third_party/benchmarks/nfn
+Methods: original DWSNets DWS/MLP, original NFN/NFT building blocks,
+and this repository's ProbeGen/HiddenProbe classification implementations.
 
-The upstream NFT classification config refers to NPTransformer, which is absent
-from the checked upstream experiments/models.py. NFT below is *explicitly an
-adapted classifier* assembled from the upstream Pointwise, Block and MlpHead
-implementations; it must not be described as the original end-to-end classifier.
+The original NFT repository contains an AutoEncoder encoder but its
+experiments.models.NPTransformer classification class is missing. For NFT,
+this script executes exactly the published INR2Array encoder modules and
+adds a small untrained linear timing-only head. This is NOT a checkpointed
+original NFT classifier; results are inference-cost measurements only.
 
-Each method runs in its own Python process to avoid 'experiments' and 'nn'
-namespace collisions. Each sees the same INRs in the same order; no training,
-no warmup, one no-grad eval pass. Checkpoint I/O/target creation and forward
-time are reported separately. Use --limit 64 for an initial smoke test.
+Each method independently loads the same canonical MNIST INR TRAIN split,
+builds its predictor, and performs one eval/no-grad forward over the split.
+No warmup or training. Original weights are randomly initialized. Data time
+covers reading INR checkpoints to CPU; forward time includes input transfer
+to GPU and, for probing methods, constructing frozen target INR modules.
 
-Run from the repository root:
-  python measurments/benchmark_mnist_regression_forward.py --limit 64
-  python measurments/benchmark_mnist_regression_forward.py --dataset mnist
-  python measurments/benchmark_mnist_regression_forward.py --dataset fmnist
+The historical filename is retained so existing paths keep working, but
+this script exclusively benchmarks INR classification.
+
+Smoke test:
+  python measurments/benchmark_mnist_regression_forward.py --limit 32
+Full train split (55,000 INRs):
+  python measurments/benchmark_mnist_regression_forward.py
+One method:
+  python measurments/benchmark_mnist_regression_forward.py --method nfn
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
 import csv
 import gc
-import json
-import os
 import random
-import subprocess
 import sys
-import tempfile
 import time
 import traceback
+from functools import partial
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-THIRD = ROOT / "third_party" / "benchmarks"
-DWS_ROOT = THIRD / "DWSNets"
-NFN_ROOT = THIRD / "nfn"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import numpy as np
+import torch
+
 METHODS = ("probegen", "hiddenprobe", "dws", "nfn", "nft", "mlp")
-DATASETS = ("mnist", "fmnist")
+KEY_W = tuple(f"seq.{i}.weight" for i in range(3))
+KEY_B = tuple(f"seq.{i}.bias" for i in range(3))
+EXPECTED_W = ((32, 2), (32, 32), (1, 32))
+EXPECTED_B = ((32,), (32,), (1,))
+DWS_ROOT = ROOT / "third_party/benchmarks/DWSNets"
+NFN_ROOT = ROOT / "third_party/benchmarks/nfn"
 
 
-def parse_args():
-    p = argparse.ArgumentParser(description=__doc__,
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--dataset", choices=DATASETS, default="mnist")
-    p.add_argument("--methods", default=",".join(METHODS),
-                   help="Comma-separated methods (default: all six)")
+def arguments():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--method", choices=("all", *METHODS), default="all")
+    p.add_argument("--data-dir", type=Path,
+                   default=ROOT / "data/classification/mnist_inr/dataset")
+    p.add_argument("--split", type=Path,
+                   default=ROOT / "data/classification/mnist_inr/mnist_splits.json")
     p.add_argument("--batch-size", type=int, default=32)
+    p.add_argument("--limit", type=int, default=0,
+                   help="0 = complete MNIST INR training split; use 32 for a smoke test")
     p.add_argument("--n-probes", type=int, default=128)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="cuda")
     p.add_argument("--precision", choices=("bf16", "fp32"), default="bf16")
-    p.add_argument("--limit", type=int, default=0, help="0 = full train split")
-    p.add_argument("--data-root", type=Path, default=ROOT / "data")
-    p.add_argument("--csv", type=Path, default=None)
-    p.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
-    p.add_argument("--method", choices=METHODS, help=argparse.SUPPRESS)
-    p.add_argument("--result-json", type=Path, help=argparse.SUPPRESS)
-    args = p.parse_args()
-    if args.batch_size <= 0 or args.n_probes <= 0 or args.limit < 0:
-        p.error("batch size and probe count must be positive; limit must be >= 0")
-    args.selected = [s.strip().lower() for s in args.methods.split(",")]
-    if (not args.selected or any(x not in METHODS for x in args.selected)
-            or len(args.selected) != len(set(args.selected))):
-        p.error("--methods must be a nonempty subset without duplicates of " + ",".join(METHODS))
-    if args.worker and (not args.method or not args.result_json):
-        p.error("--worker requires --method and --result-json")
-    if args.csv is None:
-        args.csv = ROOT / "measurments" / "results" / (args.dataset + "_inr_forward.csv")
-    return args
-
-
-def original_environment(method):
-    env = os.environ.copy()
-    if method in ("dws", "mlp"):
-        base = DWS_ROOT
-    elif method in ("nfn", "nft"):
-        base = NFN_ROOT
-    else:
-        base = ROOT
-    if not base.is_dir():
-        raise FileNotFoundError(f"Missing original repository: {base}")
-    roots = [str(base), str(ROOT)]
-    if method in ("nfn", "nft"):
-        roots.insert(1, str(NFN_ROOT / "experiments" / "perceiver-pytorch"))
-    env["PYTHONPATH"] = os.pathsep.join(roots + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
-    return env
-
-
-def save_csv(path, rows):
-    columns = ("dataset", "method", "implementation", "targets", "batch_size",
-               "n_probes", "queries_per_target", "target_params",
-               "trainable_params", "all_params", "precision", "device", "seed",
-               "data_s", "build_s", "forward_s", "total_s")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(path.name + ".tmp")
-    with temp.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=columns)
-        w.writeheader()
-        w.writerows(rows)
-    os.replace(temp, path)
-
-
-def parent(args):
-    print("=" * 111, flush=True)
-    print(f"{args.dataset.upper()} INR TRAIN | methods={','.join(args.selected)} | "
-          f"batch={args.batch_size} | Q={args.n_probes} | precision={args.precision} | "
-          f"limit={args.limit or 'FULL'}", flush=True)
-    print("NOTE: NFT is an adapted classifier built from original NFT blocks; no original NPTransformer class.",
-          flush=True)
-    print("All predictors are freshly initialized. These are inference timings, NOT accuracy results.",
-          flush=True)
-    rows = []
-    with tempfile.TemporaryDirectory(prefix="inr_benchmark_") as temp:
-        for index, method in enumerate(args.selected, 1):
-            dest = Path(temp) / (method + ".json")
-            command = [
-                sys.executable, str(Path(__file__).resolve()), "--worker",
-                "--method", method, "--result-json", str(dest),
-                "--dataset", args.dataset, "--data-root", str(args.data_root),
-                "--batch-size", str(args.batch_size), "--n-probes", str(args.n_probes),
-                "--seed", str(args.seed), "--device", args.device,
-                "--precision", args.precision, "--limit", str(args.limit),
-            ]
-            print(f"\n[{index}/{len(args.selected)}] {method}", flush=True)
-            subprocess.run(command, cwd=str(ROOT), env=original_environment(method), check=True)
-            row = json.loads(dest.read_text())
-            rows.append(row)
-            if len({r["targets"] for r in rows}) != 1:
-                raise RuntimeError("Methods saw different numbers of INRs")
-            save_csv(args.csv, rows)  # Incremental results survive a later failure.
-            print(f"  forward={row['forward_s']:.3f}s, total={row['total_s']:.3f}s, "
-                  f"trainable={row['trainable_params']:,}", flush=True)
-
-    print("\n" + "=" * 111)
-    print(f"{'Method':<15} {'Targets':>9} {'Params':>13} {'Queries':>8} "
-          f"{'Data(s)':>11} {'Build(s)':>11} {'Forward(s)':>13} {'Total(s)':>12}")
-    for r in rows:
-        print(f"{r['method']:<15} {r['targets']:>9,} {r['trainable_params']:>13,} "
-              f"{r['queries_per_target']:>8} {r['data_s']:>11.3f} {r['build_s']:>11.3f} "
-              f"{r['forward_s']:>13.3f} {r['total_s']:>12.3f}")
-    print("=" * 111)
-    print(f"CSV: {args.csv}")
-    print("Data: checkpoint I/O, target creation where needed, and transfers.")
-    print("Forward: full no-grad inference pass; GPU synchronized after every batch.")
+    p.add_argument("--csv", type=Path,
+                   default=ROOT / "measurments/mnist_inr_forward.csv")
+    return p.parse_args()
 
 
 def seed_everything(seed):
-    import numpy as np
-    import torch
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -161,246 +82,370 @@ def seed_everything(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def synchronize(device):
-    import torch
+def sync(device):
     if device.type == "cuda":
         torch.cuda.synchronize(device)
 
 
-def import_original(method):
-    if method in ("nfn", "nft"):
-        # Force NFN's experiments namespace: an installed DWSNets experiments
-        # package can otherwise shadow the cloned NFN experiments directory.
-        import types
-        sys.path.insert(0, str(NFN_ROOT))
-        sys.path.insert(0, str(NFN_ROOT / "experiments" / "perceiver-pytorch"))
-        pkg = types.ModuleType("experiments")
-        pkg.__package__ = "experiments"
-        pkg.__path__ = [str(NFN_ROOT / "experiments")]
-        sys.modules["experiments"] = pkg
-        from experiments.models import InvariantNFN, MlpHead, Block
-        from nfn.common import WeightSpaceFeatures, network_spec_from_wsfeat
-        from nfn.layers import GaussianFourierFeatureTransform, Pointwise
-        return (InvariantNFN, MlpHead, Block, WeightSpaceFeatures,
-                network_spec_from_wsfeat, GaussianFourierFeatureTransform, Pointwise)
-    if method in ("dws", "mlp"):
-        sys.path.insert(0, str(DWS_ROOT))
-        from nn.models import DWSModelForClassification, MLPModelForClassification
-        return DWSModelForClassification, MLPModelForClassification
-    sys.path.insert(0, str(ROOT))
-    from models.probegen_core import ProbeGen
-    from data_probegen import INR_Network
-    return ProbeGen, INR_Network
-
-
-def get_paths(args):
-    base = args.data_root / "classification"
-    if args.dataset in ("mnist", "fmnist"):
-        folder = base / (args.dataset + "_inr")
-        split = folder / (args.dataset + "_splits.json")
-        if not split.is_file():
-            raise FileNotFoundError(f"Missing {split}; run the appropriate setup_data script")
-        data = json.loads(split.read_text())["train"]
-        paths = [folder / "dataset" / p for p in data["path"]]
-    else:
-        raise ValueError(f"Unsupported INR dataset: {args.dataset}")
-    if args.limit:
-        paths = paths[:args.limit]
-    if not paths:
-        raise RuntimeError("Empty INR train split")
-    if not paths[0].is_file() or not paths[-1].is_file():
-        raise FileNotFoundError(f"Missing INR checkpoints: {paths[0]} or {paths[-1]}")
-    return paths
-
-
-def load_weights(path):
-    import torch
-    state = torch.load(path, map_location="cpu", weights_only=True)
-    if "seq.0.weight" in state:
-        wk = [f"seq.{i}.weight" for i in range(3)]
-        bk = [f"seq.{i}.bias" for i in range(3)]
-    elif "net.0.linear.weight" in state:
-        wk = ["net.0.linear.weight", "net.1.linear.weight", "net.2.weight"]
-        bk = ["net.0.linear.bias", "net.1.linear.bias", "net.2.bias"]
-    else:
-        raise ValueError(f"Unrecognized INR checkpoint {path}: {list(state)[:8]}")
-    return (tuple(state[k].float().contiguous() for k in wk),
-            tuple(state[k].float().contiguous() for k in bk))
-
-
-def build_predictor(method, sample, libs, args, device):
-    from functools import partial
-    import torch
-    from torch import nn
-    w, b = sample
-    if method in ("probegen", "hiddenprobe"):
-        ProbeGen, _ = libs
-        model = ProbeGen(
-            n_tokens=args.n_probes, d_hidden=256,
-            models_c_in=w[0].shape[1], models_c_out=w[-1].shape[0],
-            d_out=10, gen_type="linear_2_no_acts", gen_latent_z=32,
-            generator_width=16, mixer_n_layers=6,
-            include_hidden_features=(method == "hiddenprobe"),
-            per_probe_mlp="mlp2", per_probe_mlp_width=256,
-            per_probe_out_dim=4, per_probe_init="standard",
-            n_hidden_target_layers=2, r_per_hidden=2, rank=8, seed=args.seed,
+def add_original_repo(root, required):
+    if not (root / required).is_file():
+        raise FileNotFoundError(
+            f"Missing original repository: {root / required}\n"
+            "Clone the original DWSNets and nfn repositories into "
+            "third_party/benchmarks first."
         )
-        implementation = ("HiddenProbe core, INR classification" if method == "hiddenprobe"
-                          else "ProbeGen core, INR classification")
-        return model.to(device), implementation
-    if method in ("dws", "mlp"):
-        DWS, MLP = libs
-        if method == "dws":
-            model = DWS(
-                weight_shapes=tuple((wi.shape[1], wi.shape[0]) for wi in w),
-                bias_shapes=tuple((bi.numel(),) for bi in b),
-                input_features=1, hidden_dim=32, n_hidden=4,
-                reduction="max", n_fc_layers=1, set_layer="sab", n_out_fc=1,
-                dropout_rate=0.0, bn=True,
-            )
-            return model.to(device), "official DWSNets DWSModelForClassification"
-        model = MLP(in_dim=sum(t.numel() for t in (w + b)),
-                    hidden_dim=32, n_hidden=4, bn=True)
-        return model.to(device), "official DWSNets MLPModelForClassification"
-    InvariantNFN, MlpHead, Block, WSF, spec_fn, Fourier, Pointwise = libs
-    sample_features = WSF(tuple(t[None, None] for t in w),
-                          tuple(t[None, None] for t in b))
-    spec = spec_fn(sample_features, set_all_dims=True)
-    if method == "nfn":
-        model = InvariantNFN(
-            network_spec=spec, hchannels=[512, 512, 512],
-            head_cls=partial(MlpHead, num_out=10, dropout=0.1, sigmoid=False),
-            mode="HNP", feature_dropout=0.1, normalize=False,
-            lnorm=None, append_stats=False,
-            inp_enc_cls=partial(Fourier, mapping_size=128, scale=3),
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+
+
+def nfn_imports():
+    add_original_repo(NFN_ROOT, "experiments/models.py")
+    perceiver = NFN_ROOT / "experiments/perceiver-pytorch"
+    if str(perceiver) not in sys.path:
+        sys.path.insert(0, str(perceiver))
+    from nfn.common import WeightSpaceFeatures, network_spec_from_wsfeat
+    from nfn.layers import GaussianFourierFeatureTransform, LearnedPosEmbedding
+    from experiments.models import InvariantNFN, MlpHead, Block
+    from experiments.inr2array import PerceiverPooling
+    return (WeightSpaceFeatures, network_spec_from_wsfeat,
+            GaussianFourierFeatureTransform, LearnedPosEmbedding,
+            InvariantNFN, MlpHead, Block, PerceiverPooling)
+
+
+def load_train_weights(args):
+    """Read original checkpoints once per method without caching 55k nn.Modules."""
+    from data_probegen import INRDataset
+
+    if not args.split.is_file():
+        raise FileNotFoundError(
+            f"Missing MNIST INR split: {args.split}\n"
+            "Run bash scripts/setup_data/classification_mnist.sh"
         )
-        return model.to(device), "official NFN InvariantNFN (MNIST INR config)"
-    # Missing upstream NPTransformer: an honest adaptation of original NFT parts.
-    model = nn.Sequential(
-        Pointwise(spec, 1, 128),
-        *(Block(spec, channels=128, dropout=0.1) for _ in range(4)),
-        MlpHead(spec, 128, append_stats=False, num_out=10,
-                pool_mode="HNP", dropout=0.0, sigmoid=False),
+    ds = INRDataset(
+        dataset_dir=args.data_dir,
+        splits_path=args.split.resolve(),
+        split="train",
     )
-    return model.to(device), "adapted NFT (official Pointwise + 4 Blocks + MlpHead)"
+    n = len(ds) if args.limit == 0 else min(len(ds), args.limit)
+    if n < 1:
+        raise ValueError("The selected MNIST INR training set is empty")
+    paths = ds.dataset["path"][:n]
+    first = torch.load(paths[0], map_location="cpu", weights_only=True)
+
+    for key, shape in zip(KEY_W, EXPECTED_W):
+        if tuple(first[key].shape) != shape:
+            raise ValueError(f"{key} has shape {tuple(first[key].shape)} != {shape}")
+    for key, shape in zip(KEY_B, EXPECTED_B):
+        if tuple(first[key].shape) != shape:
+            raise ValueError(f"{key} has shape {tuple(first[key].shape)} != {shape}")
+
+    all_keys = KEY_W + KEY_B
+    arrays = {
+        key: torch.empty((n, *first[key].shape), dtype=first[key].dtype)
+        for key in all_keys
+    }
+    for i, path in enumerate(paths):
+        state = first if i == 0 else torch.load(
+            path, map_location="cpu", weights_only=True
+        )
+        for key in all_keys:
+            if tuple(state[key].shape) != tuple(first[key].shape):
+                raise ValueError(f"Incompatible INR weights at {path}: {key}")
+            arrays[key][i].copy_(state[key])
+    return (
+        tuple(arrays[k] for k in KEY_W),
+        tuple(arrays[k] for k in KEY_B),
+        n,
+    )
 
 
-def prepare_batch(method, examples, device, libs, dataset):
-    import torch
-    if method in ("probegen", "hiddenprobe"):
-        _, INR_Network = libs
-        models = []
-        for weights, biases in examples:
-            net = INR_Network(
-                in_features=weights[0].shape[1], n_layers=len(weights),
-                hidden_features=weights[0].shape[0],
-                out_features=weights[-1].shape[0],
-                output_shift=0.0 if dataset.startswith("cifar10") else 0.5,
-            )
-            state = {}
-            for i, (w, b) in enumerate(zip(weights, biases)):
-                state[f"seq.{i}.weight"] = w
-                state[f"seq.{i}.bias"] = b
-            net.load_state_dict(state)
-            net.eval().requires_grad_(False)
-            models.append(net.to(device))
-        return models
+def nfn_batch(ws, bs, start, stop, device):
+    return ws(
+        tuple(w[start:stop].unsqueeze(1).to(device) for w in bs[0]),
+        tuple(b[start:stop].unsqueeze(1).to(device) for b in bs[1]),
+    )
+
+
+def dws_batch(bs, start, stop, device):
+    # Original DWSNets layout: [B, in_dim, out_dim, feature_channels].
+    # Original PyTorch checkpoints: [B, out_dim, in_dim].
+    return (
+        tuple(w[start:stop].transpose(-1, -2).unsqueeze(-1).to(device)
+              for w in bs[0]),
+        tuple(b[start:stop].unsqueeze(-1).to(device) for b in bs[1]),
+    )
+
+
+def build_nfn(spec):
+    (WS, spec_fn, GFF, PosEmb, InvariantNFN, MlpHead, Block, Pool) = nfn_imports()
+    return InvariantNFN(
+        network_spec=spec,
+        hchannels=[512, 512, 512],
+        head_cls=partial(MlpHead, num_out=10, dropout=0.1),
+        mode="HNP",
+        feature_dropout=0.1,
+        normalize=False,
+        lnorm=None,
+        append_stats=False,
+        inp_enc_cls=partial(GFF, mapping_size=128, scale=3),
+    )
+
+
+def build_nft_encoder(spec):
+    """Original INR2Array NFT encoder; linear head is a timing-only adapter.
+
+    The downloaded nfn repo's nft.yaml references an unavailable NPTransformer,
+    so claiming that class to be original would be misleading. The six original
+    Block modules and original PerceiverPooling are used without modifications.
+    """
+    (WS, spec_fn, GFF, PosEmb, Inv, Head, Block, Pool) = nfn_imports()
+    channels = 256
+    encoder = torch.nn.Sequential(
+        GFF(spec, 1, mapping_size=128, scale=3),
+        PosEmb(spec, channels),
+        *[
+            Block(spec, channels, ff_factor=4, num_heads=4, dropout=0)
+            for _ in range(6)
+        ],
+        Pool(
+            spec, channels, n_latent=16, latent_dim=256, reduce=False,
+            attn_dropout=0, ff_dropout=0, self_per_cross_attn=0,
+        ),
+    )
+    # Encoder returns [B,16,256]; no decoder is run for classification.
+    # The untrained head is explicitly not part of the original NFT encoder.
+    return encoder, torch.nn.Linear(16 * 256, 10)
+
+
+def build_model(method, args, data):
+    ws, bs = None, data[:2]
+    if method in ("nfn", "nft"):
+        (WS, spec_fn, *_other) = nfn_imports()
+        sample = WS(
+            tuple(w[:1].unsqueeze(1) for w in bs[0]),
+            tuple(b[:1].unsqueeze(1) for b in bs[1]),
+        )
+        spec = spec_fn(sample, set_all_dims=True)
+        if method == "nfn":
+            return build_nfn(spec), WS, None
+        encoder, head = build_nft_encoder(spec)
+        return torch.nn.ModuleDict({"encoder": encoder, "head": head}), WS, None
+
     if method in ("dws", "mlp"):
-        # Official DWSNets data loader transposes weight dimensions and appends
-        # a singleton feature dimension: (batch, input, output, 1).
-        w = tuple(torch.stack([ws[i].t().unsqueeze(-1) for ws, _ in examples]).to(device)
-                  for i in range(len(examples[0][0])))
-        b = tuple(torch.stack([bs[i].unsqueeze(-1) for _, bs in examples]).to(device)
-                  for i in range(len(examples[0][1])))
-        return w, b
-    WSF = libs[3]
-    # NFN convention: (batch, feature_channels, output, input).
-    w = tuple(torch.stack([ws[i] for ws, _ in examples]).unsqueeze(1).to(device)
-              for i in range(len(examples[0][0])))
-    b = tuple(torch.stack([bs[i] for _, bs in examples]).unsqueeze(1).to(device)
-              for i in range(len(examples[0][1])))
-    return WSF(w, b)
+        add_original_repo(DWS_ROOT, "nn/models.py")
+        from nn.models import DWSModelForClassification, MLPModelForClassification
+
+        weight_shapes = tuple((w.shape[-1], w.shape[-2]) for w in bs[0])
+        bias_shapes = tuple((b.shape[-1],) for b in bs[1])
+        if method == "dws":
+            model = DWSModelForClassification(
+                weight_shapes=weight_shapes,
+                bias_shapes=bias_shapes,
+                input_features=1,
+                hidden_dim=32,
+                n_hidden=4,
+                n_classes=10,
+                reduction="max",
+                n_fc_layers=1,
+                set_layer="sab",
+                n_out_fc=1,
+                dropout_rate=0.0,
+                bn=True,
+            )
+        else:
+            model = MLPModelForClassification(
+                in_dim=sum(int(t[0].numel()) for t in bs[0] + bs[1]),
+                hidden_dim=32,
+                n_hidden=4,
+                n_classes=10,
+                bn=True,
+            )
+        return model, None, None
+
+    if method in ("probegen", "hiddenprobe"):
+        from models.probegen_core import ProbeGen
+        # Exactly the architecture/hyperparameters from run_mnist_inr.sh.
+        # The canonical trainer forces include_hidden_features=True only
+        # for HiddenProbe; all other architecture parameters are shared.
+        model = ProbeGen(
+            n_tokens=args.n_probes,
+            d_hidden=256,
+            models_c_in=2,
+            models_c_out=1,
+            d_out=10,
+            gen_type="linear_2_no_acts",
+            gen_latent_z=32,
+            generator_width=16,
+            mixer_n_layers=6,
+            include_hidden_features=(method == "hiddenprobe"),
+            per_probe_mlp="mlp2",
+            per_probe_mlp_width=256,
+            per_probe_out_dim=4,
+            per_probe_init="standard",
+            n_hidden_target_layers=2 if method == "hiddenprobe" else 0,
+            r_per_hidden=2,
+            rank=8,
+            seed=args.seed,
+        )
+        return model, None, None
+    raise ValueError(method)
 
 
-def worker(args):
-    import torch
-    device = torch.device(args.device)
-    if device.type == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("CUDA unavailable; use --device cpu for a smoke test")
-    libs = import_original(args.method)  # Python import is not timed.
+def build_target_batch(data, start, stop, device):
+    from data_probegen import INR_Network
+
+    weights, biases = data[:2]
+    result = []
+    for i in range(start, stop):
+        net = INR_Network(
+            in_features=2, n_layers=3, hidden_features=32, out_features=1
+        ).to(device)
+        state = {}
+        for j in range(3):
+            state[f"seq.{j}.weight"] = weights[j][i]
+            state[f"seq.{j}.bias"] = biases[j][i]
+        net.load_state_dict(state)
+        net.eval()
+        net.requires_grad_(False)
+        result.append(net)
+    return result
+
+
+def forward_all(method, model, aux, data, args, device):
+    weights, biases, n = data
+    precision = args.precision == "bf16" and device.type == "cuda"
+    WS = aux
+    with torch.no_grad():
+        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=precision):
+            for start in range(0, n, args.batch_size):
+                stop = min(n, start + args.batch_size)
+                if method in ("probegen", "hiddenprobe"):
+                    nets = build_target_batch(data, start, stop, device)
+                    output = model(nets=nets)
+                    del nets
+                elif method in ("nfn", "nft"):
+                    features = nfn_batch(WS, data, start, stop, device)
+                    if method == "nfn":
+                        output = model(features)
+                    else:
+                        embeddings = model["encoder"](features)
+                        output = model["head"](embeddings.flatten(start_dim=1))
+                else:
+                    features = dws_batch(data, start, stop, device)
+                    output = model(features)
+                if tuple(output.shape) != (stop - start, 10):
+                    raise RuntimeError(
+                        f"{method}: unexpected output shape {tuple(output.shape)}"
+                    )
+
+
+def run_method(method, args, device):
+    seed_everything(args.seed)
     gc.collect()
     if device.type == "cuda":
         torch.cuda.empty_cache()
-    seed_everything(args.seed)
-    synchronize(device)
-    start_total = time.perf_counter()
+    sync(device)
+
+    total_start = time.perf_counter()
     t = time.perf_counter()
-    paths = get_paths(args)
-    first = load_weights(paths[0])
-    synchronize(device)
+    data = load_train_weights(args)
+    sync(device)
     data_s = time.perf_counter() - t
-    target_params = sum(t.numel() for t in first[0] + first[1])
 
     t = time.perf_counter()
-    model, implementation = build_predictor(args.method, first, libs, args, device)
+    model, aux, _ = build_model(method, args, data)
+    model = model.float().to(device)
     model.eval()
-    synchronize(device)
+    sync(device)
     build_s = time.perf_counter() - t
+    params = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    total_params = sum(p.numel() for p in model.parameters())
 
-    amp = (lambda: torch.autocast(device_type="cuda", dtype=torch.bfloat16)
-           if args.precision == "bf16" and device.type == "cuda"
-           else contextlib.nullcontext)
-    forward_s = 0.0
-    completed = 0
-    with torch.no_grad():
-        for start in range(0, len(paths), args.batch_size):
-            chunk = paths[start:start + args.batch_size]
-            t = time.perf_counter()
-            examples = [first if start == 0 and offset == 0 else load_weights(path)
-                        for offset, path in enumerate(chunk)]
-            batch = prepare_batch(args.method, examples, device, libs, args.dataset)
-            synchronize(device)
-            data_s += time.perf_counter() - t
+    t = time.perf_counter()
+    forward_all(method, model, aux, data, args, device)
+    sync(device)
+    forward_s = time.perf_counter() - t
+    total_s = time.perf_counter() - total_start
 
-            t = time.perf_counter()
-            with amp():
-                if args.method in ("probegen", "hiddenprobe"):
-                    out = model(nets=batch)
-                else:
-                    out = model(batch)
-            synchronize(device)
-            forward_s += time.perf_counter() - t
-            if tuple(out.shape) != (len(chunk), 10):
-                raise RuntimeError(f"{args.method}: unexpected output shape {tuple(out.shape)}")
-            completed += len(chunk)
-            if completed % 3200 == 0 or completed == len(paths):
-                print(f"  {args.method}: {completed:,}/{len(paths):,}", flush=True)
-            del examples, batch, out
+    result = {
+        "method": method,
+        "dataset": "MNIST INR classification",
+        "split": "train",
+        "targets": data[2],
+        "batch_size": args.batch_size,
+        "seed": args.seed,
+        "precision": args.precision if device.type == "cuda" else "fp32",
+        "params": params,
+        "trainable_params": trainable,
+        "target_queries": args.n_probes if method in ("probegen", "hiddenprobe") else 0,
+        "data_seconds": round(data_s, 6),
+        "build_seconds": round(build_s, 6),
+        "forward_seconds": round(forward_s, 6),
+        "total_seconds": round(total_s, 6),
+        "note": ("Original INR2Array NFT encoder + untrained linear timing head"
+                 if method == "nft" else
+                 "ProbeGen core with hidden features" if method == "hiddenprobe"
+                 else "Original architecture, random initialization"),
+    }
+    del model, data
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+    return result
 
-    synchronize(device)
-    total_s = time.perf_counter() - start_total
-    if completed != len(paths):
-        raise RuntimeError(f"Incomplete pass: {completed}/{len(paths)}")
-    result = dict(
-        dataset=args.dataset, method=args.method, implementation=implementation,
-        targets=completed, batch_size=args.batch_size, n_probes=args.n_probes,
-        queries_per_target=args.n_probes if args.method in ("probegen", "hiddenprobe") else 0,
-        target_params=target_params, trainable_params=trainable, all_params=total_params,
-        precision="bf16" if args.precision == "bf16" and device.type == "cuda" else "fp32",
-        device=str(device), seed=args.seed,
-        data_s=data_s, build_s=build_s, forward_s=forward_s, total_s=total_s,
-    )
-    args.result_json.parent.mkdir(parents=True, exist_ok=True)
-    args.result_json.write_text(json.dumps(result, indent=2))
-    print(f"  COMPLETE {args.method}: total={total_s:.3f}s forward={forward_s:.3f}s", flush=True)
+
+def main():
+    args = arguments()
+    if args.batch_size < 1 or args.n_probes < 1 or args.limit < 0:
+        raise ValueError("batch-size and n-probes must be positive; limit >= 0")
+    device = torch.device(args.device)
+    if device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA requested but not available")
+        if args.precision == "bf16" and not torch.cuda.is_bf16_supported():
+            raise RuntimeError("GPU lacks BF16; use --precision fp32")
+
+    wanted = METHODS if args.method == "all" else (args.method,)
+    results, failed = [], []
+    print("=" * 88, flush=True)
+    print("MNIST INR CLASSIFICATION — complete TRAIN forward timing", flush=True)
+    print(f"Methods: {', '.join(wanted)} | batch={args.batch_size} | "
+          f"Q={args.n_probes} | limit={args.limit or 'full'} | "
+          f"device={device} | precision={args.precision}", flush=True)
+    print("Untrained models. No warmup. Data load repeated per method.", flush=True)
+    print("Forward includes weight-to-device transfer; probe methods additionally "
+          "construct and evaluate each frozen INR target.", flush=True)
+    print("=" * 88, flush=True)
+
+    for i, method in enumerate(wanted, 1):
+        print(f"\n[{i}/{len(wanted)}] {method.upper()}", flush=True)
+        try:
+            row = run_method(method, args, device)
+        except Exception:
+            traceback.print_exc()
+            failed.append(method)
+            continue
+        results.append(row)
+        print(
+            f"  N={row['targets']:,} params={row['trainable_params']:,} "
+            f"data={row['data_seconds']:.3f}s "
+            f"build={row['build_seconds']:.3f}s "
+            f"forward={row['forward_seconds']:.3f}s "
+            f"TOTAL={row['total_seconds']:.3f}s", flush=True
+        )
+
+    if results:
+        args.csv.parent.mkdir(parents=True, exist_ok=True)
+        with args.csv.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(results[0]))
+            writer.writeheader()
+            writer.writerows(results)
+        print(f"\nCSV saved: {args.csv}", flush=True)
+    if failed:
+        raise SystemExit(f"Failed methods: {', '.join(failed)}")
+    if len(results) != len(wanted):
+        raise SystemExit("Missing results")
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    try:
-        worker(args) if args.worker else parent(args)
-    except Exception:
-        traceback.print_exc()
-        sys.exit(1)
+    main()
