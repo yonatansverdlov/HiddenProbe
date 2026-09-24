@@ -45,12 +45,13 @@ for PROBE_LR in 1e-4 3e-4 6e-4; do
         --batch_size 32 --rank_loss_w 0.0 --weight_decay 0.0 \
         --scheduler plateau --plateau_factor "$FACTOR" --plateau_patience "$PATIENCE" --plateau_min_lr 3e-5 \
         --epochs 150 --eval_every 500 --eval_cnn_bs 256 \
-        --seed "$SEED" --exp_name "$EXP_NAME" --out_dir "$EXP_DIR"
+        --seed "$SEED" --skip_test_eval 1 --exp_name "$EXP_NAME" --out_dir "$EXP_DIR"
     done
   done
 done
 
-# Rank configurations by validation tau, not by test performance.
+# Select the winning configuration using validation tau ONLY.
+# Test data are not evaluated during tuning.
 python - "$SWEEP_ROOT" <<'PY'
 import csv
 import json
@@ -71,20 +72,80 @@ for path in root.glob("*/summary.json"):
     rows.append({
         **match.groupdict(),
         "best_val_tau": float(result["best_val_tau"]),
-        "final_test_tau": result.get("final_test_tau", ""),
         "best_epoch": result.get("best_epoch", ""),
         "best_step": result.get("best_step", ""),
     })
 
+if len(rows) != 24:
+    raise RuntimeError(f"Expected 24 completed sweep configurations, found {len(rows)}")
 rows.sort(key=lambda x: x["best_val_tau"], reverse=True)
-out = root / "sweep_results.csv"
-fields = ["n_probes", "probe_lr", "factor", "patience", "seed", "best_val_tau", "final_test_tau", "best_epoch", "best_step"]
-with out.open("w", newline="") as f:
+
+csv_path = root / "sweep_results.csv"
+fields = ["n_probes", "probe_lr", "factor", "patience", "seed", "best_val_tau", "best_epoch", "best_step"]
+with csv_path.open("w", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=fields)
     writer.writeheader()
     writer.writerows(rows)
-print(f"Completed {len(rows)}/24 configurations. Results: {out}")
-for row in rows[:5]:
-    print(f"probe_lr={row['probe_lr']} factor={row['factor']} patience={row['patience']} "
-          f"val_tau={row['best_val_tau']:.4f}")
+
+best = rows[0]
+selected = {
+    "lr": 3e-4,
+    "probe_lr": best["probe_lr"],
+    "plateau_factor": best["factor"],
+    "plateau_patience": int(best["patience"]),
+    "selected_by": "highest best_val_tau on sweep seed 0",
+    "sweep_best_val_tau": best["best_val_tau"],
+}
+selection_path = root / "selected_config.json"
+selection_path.write_text(json.dumps(selected, indent=2) + "\n")
+print(f"Completed 24/24 sweep configurations. Ranked CSV: {csv_path}")
+print(f"SELECTED: lr=3e-4 probe_lr={best['probe_lr']} "
+      f"factor={best['factor']} patience={best['patience']} "
+      f"val_tau={best['best_val_tau']:.4f}")
+print(f"Selected configuration saved to {selection_path}")
 PY
+
+BEST_SETTINGS="$(python - "$SWEEP_ROOT/selected_config.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1]) as f:
+    config = json.load(f)
+print(config["probe_lr"], config["plateau_factor"], config["plateau_patience"])
+PY
+)"
+read -r BEST_PROBE_LR BEST_FACTOR BEST_PATIENCE <<< "$BEST_SETTINGS"
+
+# Full 5-seed evaluation of the single selected configuration.
+FINAL_ROOT="${OUT_DIR:-checkpoints}/svhn_probe_lr_best_Q${N_PROBES}"
+mkdir -p "$FINAL_ROOT"
+SUMMARIES=()
+echo "========== BEST CONFIG: lr=3e-4 probe_lr=$BEST_PROBE_LR factor=$BEST_FACTOR patience=$BEST_PATIENCE =========="
+for FINAL_SEED in 0 1 2 3 4; do
+  EXP_NAME="hiddenprobe_svhn_best_Q${N_PROBES}_s${FINAL_SEED}"
+  EXP_DIR="$FINAL_ROOT/$EXP_NAME"
+  SUMMARIES+=("$EXP_DIR/summary.json")
+
+  if [[ -s "$EXP_DIR/summary.json" ]]; then
+    echo "Completed: $EXP_NAME (skipping)"
+    continue
+  fi
+
+  echo "========== FINAL SEED $FINAL_SEED / 4 =========="
+  python "$MAIN_PY" \
+    --method hiddenprobe --task regression --dataset svhn \
+    --zoo svhn_gs --gen_type deep_linear_6 --models_c_in 1 \
+    --zoo_data_dir "$ZOO_DIR" --zoo_split "$SPLIT" \
+    --hidden_mode on --probe_sharing shared --assert_canonical 1 --target_space raw \
+    --adapter_preset expressive --interaction_rank 96 --mixer_hidden 384 --hidden_dim 0 \
+    --n_probes "$N_PROBES" \
+    --lr 3e-4 --probe_lr "$BEST_PROBE_LR" --hidden_lr 0 \
+    --batch_size 32 --rank_loss_w 0.0 --weight_decay 0.0 \
+    --scheduler plateau --plateau_factor "$BEST_FACTOR" --plateau_patience "$BEST_PATIENCE" --plateau_min_lr 3e-5 \
+    --epochs 150 --eval_every 500 --eval_cnn_bs 256 \
+    --seed "$FINAL_SEED" --skip_test_eval 0 --exp_name "$EXP_NAME" --out_dir "$EXP_DIR"
+done
+
+python "$SCRIPT_DIR/aggregate_results.py" \
+  --dataset "SVHN" \
+  --model "HiddenProbe" \
+  "${SUMMARIES[@]}" | tee "$FINAL_ROOT/final_5seeds.log"
