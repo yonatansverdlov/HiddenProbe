@@ -165,7 +165,7 @@ from pathlib import Path
 prefix = os.environ["PREFIX"]
 run_root = Path(os.environ["RUN_ROOT"])
 ranked_csv = Path(os.environ["RANKED_CSV"])
-best_env = Path(os.environ["BEST_ENV"]
+best_env = Path(os.environ["BEST_ENV"])
 
 rows = []
 for lr in ("3e-4", "5e-4", "7e-4"):
