@@ -101,3 +101,137 @@ for lr in "${LRS[@]}"; do
     done
 done
 
+export RUNS_DIR PREFIX RANKED_CSV BEST_ENV
+"$PYTHON_BIN" - <<'PY'
+import csv
+import json
+import math
+import os
+from pathlib import Path
+
+root = Path(os.environ["RUNS_DIR"])
+prefix = os.environ["PREFIX"]
+ranked = Path(os.environ["RANKED_CSV"])
+best_env = Path(os.environ["BEST_ENV"])
+rows = []
+
+for lr in ("3e-4", "5e-4", "7e-4"):
+    for patience in (3, 5):
+        for factor in ("0.2", "0.3", "0.5", "0.7"):
+            exp = f"{prefix}_SWEEP15_s9_lr{lr}_pat{patience}_fac{factor}"
+            folder = root / exp
+            with (folder / "summary.json").open() as f:
+                summary = json.load(f)
+            if int(summary["seed"]) != 9 or summary["exp"] != exp:
+                raise ValueError(f"Unexpected summary contents: {exp}")
+            # CIFAR stores epoch and global step in log.csv, not summary.json.
+            with (folder / "log.csv").open(newline="") as f:
+                logs = list(csv.DictReader(f))
+            improved = [
+                r for r in logs
+                if r.get("is_best", "").strip().lower() in ("true", "1")
+            ]
+            if not improved:
+                raise RuntimeError(f"No best-validation log row: {exp}")
+            best_log = max(improved, key=lambda r: float(r["val_acc"]))
+            val = float(summary["best_val_acc"])
+            test = float(summary["best_test_acc"])
+            if not (math.isfinite(val) and math.isfinite(test)):
+                raise ValueError(f"Nonfinite result: {exp}")
+            rows.append({
+                "exp_name": exp,
+                "seed": 9,
+                "lr": lr,
+                "probe_lr": lr,
+                "patience": patience,
+                "factor": factor,
+                "best_epoch": int(best_log["epoch"]) + 1,
+                "best_global_step": int(best_log["global_step"]),
+                "best_val_acc": val,
+                "best_test_acc": test,
+            })
+
+if len(rows) != 24:
+    raise RuntimeError(f"Expected 24 configurations, got {len(rows)}")
+
+# Selection uses validation accuracy only. Test accuracy is for reporting.
+rows.sort(key=lambda r: (-r["best_val_acc"], r["best_epoch"], r["best_global_step"]))
+with ranked.open("w", newline="") as f:
+    writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(rows)
+
+best = rows[0]
+with best_env.open("w") as f:
+    f.write(f'BEST_LR="{best["lr"]}"\n')
+    f.write(f'BEST_PATIENCE="{best["patience"]}"\n')
+    f.write(f'BEST_FACTOR="{best["factor"]}"\n')
+
+print("\n" + "=" * 98)
+print("TOP 24 CONFIGURATIONS — RANKED BY VALIDATION ACCURACY")
+print("=" * 98)
+for rank, r in enumerate(rows, 1):
+    print(
+        f'{rank:2d}. val={r["best_val_acc"]:.6f} '
+        f'test={r["best_test_acc"]:.6f} [report only] '
+        f'epoch={r["best_epoch"]:2d} step={r["best_global_step"]:6d} '
+        f'lr=probe_lr={r["lr"]} patience={r["patience"]} factor={r["factor"]}'
+    )
+print(
+    f'\nSELECTED: lr=probe_lr={best["lr"]}, '
+    f'patience={best["patience"]}, factor={best["factor"]}, '
+    f'best_val_acc={best["best_val_acc"]:.6f}'
+)
+print(f"Ranking CSV: {ranked}")
+PY
+
+# Only fixed sweep-grid values are written to best.env.
+# shellcheck disable=SC1090
+source "$BEST_ENV"
+echo
+echo "FINAL FIVE-SEED RUN: seeds 0..4, 60 epochs"
+echo "lr = probe_lr = $BEST_LR, patience=$BEST_PATIENCE, factor=$BEST_FACTOR"
+
+FINAL_SUMMARIES=()
+for seed in 0 1 2 3 4; do
+    exp="${PREFIX}_FINAL60_lr${BEST_LR}_pat${BEST_PATIENCE}_fac${BEST_FACTOR}_s${seed}"
+    run_if_needed "$exp" "$seed" "$FINAL_EPOCHS" \
+        "$BEST_LR" "$BEST_PATIENCE" "$BEST_FACTOR"
+    FINAL_SUMMARIES+=("$RUNS_DIR/$exp/summary.json")
+done
+
+"$PYTHON_BIN" - "$FINAL_CSV" "${FINAL_SUMMARIES[@]}" <<'PY'
+import csv
+import json
+import sys
+from pathlib import Path
+from statistics import mean, stdev
+
+out = Path(sys.argv[1])
+rows = []
+for path in sys.argv[2:]:
+    with Path(path).open() as f:
+        s = json.load(f)
+    rows.append({
+        "seed": int(s["seed"]),
+        "best_val_acc": float(s["best_val_acc"]),
+        "best_test_acc": float(s["best_test_acc"]),
+        "exp_name": s["exp"],
+    })
+rows.sort(key=lambda r: r["seed"])
+if [r["seed"] for r in rows] != [0, 1, 2, 3, 4]:
+    raise ValueError("Expected exactly five final seeds: 0..4")
+
+with out.open("w", newline="") as f:
+    w = csv.DictWriter(f, fieldnames=list(rows[0]))
+    w.writeheader()
+    w.writerows(rows)
+
+values = [r["best_test_acc"] for r in rows]
+print("\nCIFAR10 NON-AUG — HIDDENPROBE FINAL TEST ACCURACY")
+for r in rows:
+    print(f'seed {r["seed"]}: val={r["best_val_acc"]:.6f} test={r["best_test_acc"]:.6f}')
+print(f"Mean: {mean(values):.6f}")
+print(f"Std:  {stdev(values):.6f} (sample std, ddof=1)")
+print(f"Final summary: {out}")
+PY
