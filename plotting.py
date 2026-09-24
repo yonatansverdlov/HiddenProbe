@@ -352,7 +352,7 @@ for i, y in enumerate(layer_ys):
         rows[i][0],
         color,
         edgecolor="#555555",
-        fontsize=18,
+        fontsize=22,
         lw=0.7
     )
 
@@ -367,7 +367,7 @@ for i, y in enumerate(layer_ys):
         rows[i][1],
         color,
         edgecolor="#555555",
-        fontsize=18,
+        fontsize=22,
         lw=0.7
     )
 
@@ -393,7 +393,7 @@ for i, y in enumerate(layer_ys):
         rows[i][2],
         color,
         edgecolor="#555555",
-        fontsize=18,
+        fontsize=22,
         lw=0.7
     )
 
