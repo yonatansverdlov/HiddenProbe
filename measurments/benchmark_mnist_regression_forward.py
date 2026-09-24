@@ -32,6 +32,9 @@ from __future__ import annotations
 import argparse
 import csv
 import gc
+import os
+import subprocess
+import tempfile
 import random
 import sys
 import time
@@ -71,6 +74,11 @@ def arguments():
     p.add_argument("--precision", choices=("bf16", "fp32"), default="bf16")
     p.add_argument("--csv", type=Path,
                    default=ROOT / "measurments/mnist_inr_forward.csv")
+    p.add_argument("--drop-page-cache", action="store_true",
+                   help="Clear Linux filesystem cache before each method (root or passwordless sudo required; machine-wide).")
+    p.add_argument("--same-process", action="store_true",
+                   help="Disable default per-method process isolation (debug only).")
+    p.add_argument("--child-run", action="store_true", help=argparse.SUPPRESS)
     return p.parse_args()
 
 
@@ -85,6 +93,46 @@ def seed_everything(seed):
 def sync(device):
     if device.type == "cuda":
         torch.cuda.synchronize(device)
+
+
+def cleanup_memory(device, report=False):
+    """Release Python/CUDA allocations, including when a method fails."""
+    sync(device)
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+        if hasattr(torch.cuda, "ipc_collect"):
+            torch.cuda.ipc_collect()
+        sync(device)
+        if report:
+            allocated = torch.cuda.memory_allocated(device) / 2**20
+            reserved = torch.cuda.memory_reserved(device) / 2**20
+            print(f"      CUDA after cleanup: allocated={allocated:.1f} MiB, "
+                  f"reserved={reserved:.1f} MiB", flush=True)
+
+
+def drop_linux_page_cache():
+    """Opt-in machine-wide cache eviction; fail rather than claim a cold run."""
+    if sys.platform != "linux":
+        raise RuntimeError("--drop-page-cache requires Linux")
+    os.sync()
+    try:
+        with open("/proc/sys/vm/drop_caches", "w") as out:
+            out.write("3\n")
+    except OSError as exc:
+        try:
+            result = subprocess.run(
+                ["sudo", "-n", "sh", "-c", "echo 3 > /proc/sys/vm/drop_caches"],
+                capture_output=True, text=True, check=False)
+        except FileNotFoundError as sudo_exc:
+            raise RuntimeError(
+                "Cache eviction needs root or passwordless sudo; omit "
+                "--drop-page-cache to compare forward times.") from sudo_exc
+        if result.returncode:
+            raise RuntimeError(
+                "Cache eviction needs root or passwordless sudo: "
+                + result.stderr.strip()) from exc
+    print("      Linux filesystem cache cleared", flush=True)
 
 
 def add_original_repo(root, required):
@@ -341,58 +389,102 @@ def forward_all(method, model, aux, data, args, device):
 
 def run_method(method, args, device):
     seed_everything(args.seed)
-    gc.collect()
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
-    sync(device)
+    cleanup_memory(device)
+    model = data = aux = None
+    try:
+        total_start = time.perf_counter()
+        t = time.perf_counter()
+        data = load_train_weights(args)
+        sync(device)
+        data_s = time.perf_counter() - t
 
-    total_start = time.perf_counter()
-    t = time.perf_counter()
-    data = load_train_weights(args)
-    sync(device)
-    data_s = time.perf_counter() - t
+        t = time.perf_counter()
+        model, aux, _ = build_model(method, args, data)
+        model = model.float().to(device)
+        model.eval()
+        sync(device)
+        build_s = time.perf_counter() - t
+        params = sum(p.numel() for p in model.parameters())
+        trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    t = time.perf_counter()
-    model, aux, _ = build_model(method, args, data)
-    model = model.float().to(device)
-    model.eval()
-    sync(device)
-    build_s = time.perf_counter() - t
-    params = sum(p.numel() for p in model.parameters())
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        t = time.perf_counter()
+        forward_all(method, model, aux, data, args, device)
+        sync(device)
+        forward_s = time.perf_counter() - t
+        total_s = time.perf_counter() - total_start
 
-    t = time.perf_counter()
-    forward_all(method, model, aux, data, args, device)
-    sync(device)
-    forward_s = time.perf_counter() - t
-    total_s = time.perf_counter() - total_start
+        return {
+            "method": method,
+            "dataset": "MNIST INR classification",
+            "split": "train",
+            "targets": data[2],
+            "batch_size": args.batch_size,
+            "seed": args.seed,
+            "precision": args.precision if device.type == "cuda" else "fp32",
+            "params": params,
+            "trainable_params": trainable,
+            "target_queries": args.n_probes if method in ("probegen", "hiddenprobe") else 0,
+            "data_seconds": round(data_s, 6),
+            "build_seconds": round(build_s, 6),
+            "forward_seconds": round(forward_s, 6),
+            "total_seconds": round(total_s, 6),
+            "note": ("Original INR2Array NFT encoder + untrained linear timing head"
+                     if method == "nft" else
+                     "ProbeGen core with hidden features" if method == "hiddenprobe"
+                     else "Original architecture, random initialization"),
+        }
+    finally:
+        model = None
+        aux = None
+        data = None
+        cleanup_memory(device, report=True)
 
-    result = {
-        "method": method,
-        "dataset": "MNIST INR classification",
-        "split": "train",
-        "targets": data[2],
-        "batch_size": args.batch_size,
-        "seed": args.seed,
-        "precision": args.precision if device.type == "cuda" else "fp32",
-        "params": params,
-        "trainable_params": trainable,
-        "target_queries": args.n_probes if method in ("probegen", "hiddenprobe") else 0,
-        "data_seconds": round(data_s, 6),
-        "build_seconds": round(build_s, 6),
-        "forward_seconds": round(forward_s, 6),
-        "total_seconds": round(total_s, 6),
-        "note": ("Original INR2Array NFT encoder + untrained linear timing head"
-                 if method == "nft" else
-                 "ProbeGen core with hidden features" if method == "hiddenprobe"
-                 else "Original architecture, random initialization"),
-    }
-    del model, data
-    gc.collect()
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
-    return result
 
+def run_isolated(method, args):
+    """Each model gets a new Python process and CUDA context."""
+    with tempfile.TemporaryDirectory(prefix="mnist_inr_") as tmp:
+        result_csv = Path(tmp) / "method.csv"
+        cmd = [
+            sys.executable, str(Path(__file__).resolve()),
+            "--method", method,
+            "--data-dir", str(args.data_dir),
+            "--split", str(args.split),
+            "--batch-size", str(args.batch_size),
+            "--limit", str(args.limit),
+            "--n-probes", str(args.n_probes),
+            "--seed", str(args.seed),
+            "--device", args.device,
+            "--precision", args.precision,
+            "--csv", str(result_csv),
+            "--child-run",
+        ]
+        completed = subprocess.run(cmd, check=False)
+        if completed.returncode:
+            raise RuntimeError(f"{method} failed with exit code {completed.returncode}")
+        with result_csv.open(newline="") as file:
+            row = next(csv.DictReader(file))
+        for field in ("targets", "batch_size", "seed", "params",
+                      "trainable_params", "target_queries"):
+            row[field] = int(row[field])
+        for field in ("data_seconds", "build_seconds",
+                      "forward_seconds", "total_seconds"):
+            row[field] = float(row[field])
+        return row
+
+
+def print_table(results):
+    print("\n" + "=" * 108)
+    print("RESULT — MNIST-INR classification (full TRAIN forward benchmark)")
+    print("=" * 108)
+    print(f"{'method':<18}{'targets':>10}{'queries':>10}{'trainable':>15}"
+          f"{'data (s)':>14}{'build (s)':>14}{'forward (s)':>15}{'total (s)':>14}")
+    print("-" * 108)
+    for r in results:
+        print(f"{r['method']:<18}{r['targets']:>10,}{r['target_queries']:>10,}"
+              f"{r['trainable_params']:>15,}{r['data_seconds']:>14.3f}"
+              f"{r['build_seconds']:>14.3f}{r['forward_seconds']:>15.3f}"
+              f"{r['total_seconds']:>14.3f}")
+    print("=" * 108)
 
 def main():
     args = arguments()
@@ -406,46 +498,56 @@ def main():
             raise RuntimeError("GPU lacks BF16; use --precision fp32")
 
     wanted = METHODS if args.method == "all" else (args.method,)
+    isolated = len(wanted) > 1 and not args.same_process
     results, failed = [], []
-    print("=" * 88, flush=True)
-    print("MNIST INR CLASSIFICATION — complete TRAIN forward timing", flush=True)
+    print("=" * 108, flush=True)
+    print("MNIST-INR CLASSIFICATION — TRAIN, forward-only; no regression", flush=True)
     print(f"Methods: {', '.join(wanted)} | batch={args.batch_size} | "
           f"Q={args.n_probes} | limit={args.limit or 'full'} | "
           f"device={device} | precision={args.precision}", flush=True)
-    print("Untrained models. No warmup. Data load repeated per method.", flush=True)
-    print("Forward includes weight-to-device transfer; probe methods additionally "
-          "construct and evaluate each frozen INR target.", flush=True)
-    print("=" * 88, flush=True)
+    print("Isolation: " + ("fresh Python/CUDA process per method" if isolated
+                           else "in-process CUDA cleanup"), flush=True)
+    print("Filesystem cache: " + ("cold before every method" if args.drop_page_cache
+                                 else "not reset; compare forward time, not data time"),
+          flush=True)
+    print("=" * 108, flush=True)
 
     for i, method in enumerate(wanted, 1):
         print(f"\n[{i}/{len(wanted)}] {method.upper()}", flush=True)
         try:
-            row = run_method(method, args, device)
+            if args.drop_page_cache:
+                drop_linux_page_cache()
+            row = run_isolated(method, args) if isolated else run_method(method, args, device)
         except Exception:
             traceback.print_exc()
             failed.append(method)
+            if args.drop_page_cache:
+                raise
             continue
+        finally:
+            if not isolated:
+                cleanup_memory(device)
         results.append(row)
-        print(
-            f"  N={row['targets']:,} params={row['trainable_params']:,} "
-            f"data={row['data_seconds']:.3f}s "
-            f"build={row['build_seconds']:.3f}s "
-            f"forward={row['forward_seconds']:.3f}s "
-            f"TOTAL={row['total_seconds']:.3f}s", flush=True
-        )
+        print(f"  N={row['targets']:,} params={row['trainable_params']:,} "
+              f"data={row['data_seconds']:.3f}s "
+              f"build={row['build_seconds']:.3f}s "
+              f"forward={row['forward_seconds']:.3f}s "
+              f"TOTAL={row['total_seconds']:.3f}s", flush=True)
 
     if results:
+        if not args.child_run:
+            print_table(results)
         args.csv.parent.mkdir(parents=True, exist_ok=True)
-        with args.csv.open("w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=list(results[0]))
+        with args.csv.open("w", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=list(results[0]))
             writer.writeheader()
             writer.writerows(results)
-        print(f"\nCSV saved: {args.csv}", flush=True)
+        if not args.child_run:
+            print(f"\nCSV saved: {args.csv}", flush=True)
     if failed:
         raise SystemExit(f"Failed methods: {', '.join(failed)}")
     if len(results) != len(wanted):
         raise SystemExit("Missing results")
-
 
 if __name__ == "__main__":
     main()
