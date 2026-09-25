@@ -3,8 +3,8 @@ set -euo pipefail
 
 MAIN_PY="${MAIN_PY:-main.py}"
 
-DATASET="mnist_reg"
-EXP_NAME="mnist_reg_mlp2_out10_dhid351_FINAL_5SEEDS_60E_cosine_lr7e-4"
+DATASET="fmnist_reg"
+EXP_NAME="fmnist_reg_mlp2_out10_dhid351_FINAL_5SEEDS_60E_plateau_lr5e-4_pat3_fac0.2"
 
 python "${MAIN_PY}" \
   --exp_name="${EXP_NAME}" \
@@ -24,8 +24,12 @@ python "${MAIN_PY}" \
   --per_probe_out_dim=10 \
   --include_hidden_features=false \
   --r_per_hidden=2 \
-  --scheduler=cosine \
-  --lr=7e-4 \
+  --scheduler=plateau \
+  --plateau_monitor=val_tau \
+  --plateau_patience=3 \
+  --plateau_factor=0.2 \
+  --plateau_min_lr=1e-6 \
+  --lr=5e-4 \
   --wd=0.0 \
   --eval_every=500 \
   --n_workers=0 \

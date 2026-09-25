@@ -1,0 +1,98 @@
+#!/bin/bash
+set -euo pipefail
+
+MAIN_PY="${MAIN_PY:-main.py}"
+
+# ============================================================
+# CIFAR10 AUGMENTED
+# Same winning CIFAR10 configuration, now on CIFAR10_aug.
+# ============================================================
+
+DATASET="cifar10_aug"
+EXP_NAME="cifar10_aug_mlp2_dhid318_FINAL_5SEEDS_10E_plateau_lr7e-4_pat3_fac0.2"
+
+N_TOKENS=128
+D_HID=318
+MIXER_LAYERS=6
+
+GEN_TYPE="linear_2_no_acts"
+GEN_LATENT_Z=32
+GENERATOR_WIDTH=16
+
+PER_PROBE_MLP="mlp2"
+PER_PROBE_MLP_WIDTH=256
+PER_PROBE_OUT_DIM=4
+INCLUDE_HIDDEN=false
+R_PER_HIDDEN=2
+
+BATCH_SIZE=64
+EPOCHS=10
+NUM_SEEDS=5
+START_SEED=0
+
+SCHEDULER="plateau"
+LR=7e-4
+PLATEAU_MONITOR="val_acc"
+PLATEAU_PATIENCE=3
+PLATEAU_FACTOR=0.2
+PLATEAU_MIN_LR=1e-6
+
+WD=0.0
+EVAL_EVERY=5000
+N_WORKERS=0
+DEVICE="cuda"
+
+# CIFAR10_aug uses the 20 extra augmented realizations in TRAIN.
+CIFAR_EXTRA_AUG=20
+CIFAR_CACHE_MODELS=false
+
+python "${MAIN_PY}" \
+    --exp_name="${EXP_NAME}" \
+    --task=classification \
+    --dataset="${DATASET}" \
+    --seed="${START_SEED}" \
+    --num_seeds="${NUM_SEEDS}" \
+    --epochs="${EPOCHS}" \
+    --batch_size="${BATCH_SIZE}" \
+    --n_tokens="${N_TOKENS}" \
+    --d_hid="${D_HID}" \
+    --mixer_n_layers="${MIXER_LAYERS}" \
+    --gen_type="${GEN_TYPE}" \
+    --gen_latent_z="${GEN_LATENT_Z}" \
+    --generator_width="${GENERATOR_WIDTH}" \
+    --per_probe_mlp="${PER_PROBE_MLP}" \
+    --per_probe_mlp_width="${PER_PROBE_MLP_WIDTH}" \
+    --per_probe_out_dim="${PER_PROBE_OUT_DIM}" \
+    --include_hidden_features="${INCLUDE_HIDDEN}" \
+    --r_per_hidden="${R_PER_HIDDEN}" \
+    --scheduler="${SCHEDULER}" \
+    --plateau_monitor="${PLATEAU_MONITOR}" \
+    --plateau_patience="${PLATEAU_PATIENCE}" \
+    --plateau_factor="${PLATEAU_FACTOR}" \
+    --plateau_min_lr="${PLATEAU_MIN_LR}" \
+    --lr="${LR}" \
+    --wd="${WD}" \
+    --eval_every="${EVAL_EVERY}" \
+    --n_workers="${N_WORKERS}" \
+    --cifar_extra_aug="${CIFAR_EXTRA_AUG}" \
+    --cifar_cache_models="${CIFAR_CACHE_MODELS}" \
+    --device="${DEVICE}"
+
+SUMMARY="experiments/${DATASET}/runs/${EXP_NAME}/seeds_summary.csv"
+
+python - <<PY
+import pandas as pd
+
+path = "${SUMMARY}"
+df = pd.read_csv(path)
+
+print(df.to_string(index=False))
+
+val = df["best_val_acc"].astype(float)
+test = df["best_test_acc"].astype(float)
+
+print()
+print(f"VAL accuracy:  {val.mean():.6f} ± {val.std(ddof=1):.6f}")
+print(f"TEST accuracy: {test.mean():.6f} ± {test.std(ddof=1):.6f}")
+print(f"Saved to: {path}")
+PY
