@@ -15,7 +15,6 @@ runs/
 wandb/
 results/
 logs/
-sweeps/
 
 # Checkpoints / logs / dumps
 *.pth
@@ -27,3 +26,8 @@ args.txt
 
 .vscode/
 .DS_Store
+
+# Local-only plotting, sweep, and measurement scripts
+/plotting.py
+/sweeps/
+/measurments/
