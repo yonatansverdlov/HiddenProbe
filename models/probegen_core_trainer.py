@@ -17,7 +17,7 @@ from scipy.stats import kendalltau
 
 from models.probegen_core import ProbeGen
 from models.logging_utils import print_run_config, print_eval, print_seed_result, print_final_summary
-from data_probegen import CIFAR10INRDataset, INRDataset, CNN_Park_ModelData
+from data_probegen import CIFAR10INRDataset, INRDataset, CachedCNNParkDataset
 
 
 # Canonical tasks/datasets:
@@ -377,7 +377,11 @@ parser.add_argument("--dataset", type=str, required=True)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = REPO_ROOT / "data"
 
-# CIFAR INR cache option. The cifar10_aug dataset itself fixes extra_aug=10.
+# CIFAR INR options, as in inr_classification_branch.
+parser.add_argument(
+    "--cifar_extra_aug", type=int, default=10,
+    help="Additional training realizations for *_aug INR datasets.",
+)
 parser.add_argument(
     "--cifar_cache_models",
     type=str2bool,
@@ -478,6 +482,8 @@ else:
 
 if args.num_seeds < 1:
     raise ValueError("--num_seeds must be >= 1")
+if args.cifar_extra_aug < 0:
+    raise ValueError("--cifar_extra_aug must be nonnegative")
 
 CLASSIFICATION_DATASETS = {
     "mnist",
@@ -695,21 +701,14 @@ def build_datasets(args):
             f"{args.task}/{args.dataset} split file",
         )
 
-        train_set = CNN_Park_ModelData(
-            dataset_dir=data_dir,
-            splits_path=split_file,
-            split="train",
+        # Share HiddenProbe's flat-tensor Wild Park cache. No extracted
+        # individual checkpoints are needed for ProbeGen.
+        cache_dir = os.environ.get("PGH_WP_CACHE") or os.path.join(
+            data_dir, "wp_cnn_cache"
         )
-        val_set = CNN_Park_ModelData(
-            dataset_dir=data_dir,
-            splits_path=split_file,
-            split="val",
-        )
-        test_set = CNN_Park_ModelData(
-            dataset_dir=data_dir,
-            splits_path=split_file,
-            split="test",
-        )
+        train_set = CachedCNNParkDataset(cache_dir=cache_dir, split="train")
+        val_set = CachedCNNParkDataset(cache_dir=cache_dir, split="val")
+        test_set = CachedCNNParkDataset(cache_dir=cache_dir, split="test")
 
         return {
             "train": train_set,
@@ -769,7 +768,7 @@ def build_datasets(args):
         num_classes = int(cfg["num_classes"])
         is_augmented = bool(cfg["augmented"])
         dataset_name = "CIFAR-100" if num_classes == 100 else "CIFAR-10"
-        effective_extra_aug = 10 if is_augmented else 0
+        effective_extra_aug = args.cifar_extra_aug if is_augmented else 0
 
         common_kwargs = {
             "dataset_dir": data_dir,
@@ -787,8 +786,11 @@ def build_datasets(args):
             assert len(train_set) == 45000, len(train_set)
             assert len(val_set) == 5000, len(val_set)
             assert len(test_set) == 10000, len(test_set)
-        elif effective_extra_aug == 10:
-            assert len(train_set) == 495000, len(train_set)
+        else:
+            expected_train = 45000 * (1 + effective_extra_aug)
+            assert len(train_set) == expected_train, (
+                len(train_set), expected_train
+            )
             assert len(val_set) == 5000, len(val_set)
             assert len(test_set) == 10000, len(test_set)
 

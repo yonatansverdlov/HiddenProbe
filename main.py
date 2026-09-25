@@ -23,6 +23,13 @@ REGRESSION_DATASETS = {"mnist", "fmnist", "svhn", "cifar10_gs", "cifar10_wp"}
 
 _DATASET_ALIASES = {
     "svh": "svhn",
+    "mnist_inr": "mnist",
+    "fmnist_inr": "fmnist",
+    "cifar10_inr": "cifar10",
+    "mnist_reg": "mnist",
+    "fmnist_reg": "fmnist",
+    "svhn_reg": "svhn",
+    "svh_reg": "svhn",
     "cifar-aug": "cifar10_aug",
     "cifar10-aug": "cifar10_aug",
     "cifar_aug": "cifar10_aug",
@@ -43,7 +50,10 @@ _REGRESSION_ZOO = {
 }
 
 USAGE = """usage:
-  python main.py --method {probegen,hiddenprobe} --task {classification,regression} --dataset DATASET [args...]
+  python main.py [--method {probegen,hiddenprobe}] [--task {classification,regression}] --dataset DATASET [args...]
+
+method defaults to probegen; task is inferred when the dataset is unambiguous.
+Specify --task for mnist and fmnist.
 
 core datasets:
   classification: mnist, fmnist, cifar10, cifar10_aug
@@ -176,20 +186,28 @@ def main() -> None:
         _run("models.transformer.train", argv[1:])
         return
 
-    method = _get_flag(argv, "method")
-    task = _get_flag(argv, "task")
+    method = (_get_flag(argv, "method") or "probegen").lower()
+    task_flag = _get_flag(argv, "task")
     dataset_raw = _get_flag(argv, "dataset")
-
-    if method is None:
-        _usage("--method {probegen,hiddenprobe} is required")
-    if task is None:
-        _usage("--task {classification,regression} is required")
     if dataset_raw is None:
         _usage("--dataset is required")
 
-    method = method.lower()
-    task = task.lower()
     dataset = _normalize_dataset(dataset_raw)
+    raw = dataset_raw.lower().strip()
+    legacy_class = {"mnist_inr", "fmnist_inr", "cifar10_inr"}
+    legacy_reg = {"mnist_reg", "fmnist_reg", "svhn_reg", "svh_reg"}
+    if task_flag is not None:
+        task = task_flag.lower()
+        if raw in legacy_class and task != "classification":
+            _usage(f"{dataset_raw!r} denotes a classification dataset")
+        if raw in legacy_reg and task != "regression":
+            _usage(f"{dataset_raw!r} denotes a regression dataset")
+    elif raw in legacy_class or dataset in CLASSIFICATION_DATASETS - REGRESSION_DATASETS:
+        task = "classification"
+    elif raw in legacy_reg or dataset in REGRESSION_DATASETS - CLASSIFICATION_DATASETS:
+        task = "regression"
+    else:
+        _usage(f"--task is required for ambiguous dataset {dataset_raw!r}")
 
     if method not in {"probegen", "hiddenprobe"}:
         _usage(f"unknown method {method!r}")

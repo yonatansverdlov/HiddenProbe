@@ -471,6 +471,77 @@ class Generic_CNN_Network(nn.Module):
         return x
 
 
+class CachedCNNParkDataset(torch.utils.data.Dataset):
+    """Lazy dataset backed by build_cnn_cache.py's Wild Park cache.
+
+    The setup script produces cnn_cache_<split>.pt containing flat, metas and
+    scores. Reconstruct each requested target CNN without extracting or
+    materializing the entire model zoo.
+    """
+
+    def __init__(self, cache_dir, split="train"):
+        if split not in {"train", "val", "test"}:
+            raise ValueError(f"Unknown Wild Park split: {split}")
+        self.cache_file = Path(cache_dir).expanduser().resolve() / (
+            f"cnn_cache_{split}.pt"
+        )
+        if not self.cache_file.is_file():
+            raise FileNotFoundError(
+                f"Missing Wild Park cache {self.cache_file}. "
+                "Run scripts/setup_data/regression_cifar10_wp.sh first."
+            )
+        # Memory-map the large flat weights on supported PyTorch releases.
+        try:
+            cache = torch.load(
+                self.cache_file, map_location="cpu", weights_only=False,
+                mmap=True,
+            )
+        except TypeError:
+            cache = torch.load(
+                self.cache_file, map_location="cpu", weights_only=False
+            )
+        self.flat = cache["flat"]
+        self.metas = cache["metas"]
+        self.scores = cache["scores"]
+        if len(self.metas) != len(self.scores):
+            raise ValueError(
+                f"Wild Park cache {self.cache_file} has "
+                f"{len(self.metas)} metadata rows but {len(self.scores)} scores"
+            )
+
+    def __len__(self):
+        return len(self.metas)
+
+    def __getitem__(self, index):
+        meta = self.metas[index]
+        offset = int(meta["offset"])
+        state_dict = {}
+        for key, shape, numel in zip(
+            meta["keys"], meta["shapes"], meta["numels"]
+        ):
+            numel = int(numel)
+            state_dict[key] = self.flat[offset:offset + numel].reshape(
+                tuple(shape)
+            )
+            offset += numel
+
+        cfg = meta["config"]
+        model = Generic_CNN_Network(
+            n_layers=int(cfg["n_layers"]),
+            channels=list(cfg["channels"]),
+            kernel_sizes=list(cfg["kernel_size"]),
+            strides=list(cfg["stride"]),
+            activations=list(cfg["activation"]),
+            paddings=list(cfg["padding"]),
+            out_size=10,
+        )
+        model.load_state_dict(state_dict)
+        model.eval()
+        for parameter in model.parameters():
+            parameter.requires_grad_(False)
+        return model, float(self.scores[index])
+
+
 class CNN_Park_ModelData(torch.utils.data.Dataset):
     def __init__(self, dataset_dir, splits_path, split="train"):
         self.split = split

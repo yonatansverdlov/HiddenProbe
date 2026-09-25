@@ -1,7 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)
+cd "$REPO_ROOT"
+
+bash scripts/setup_data/classification_cifar10.sh
+
 MAIN_PY="${MAIN_PY:-main.py}"
+
 
 # ============================================================
 # CIFAR10 AUGMENTED
@@ -22,7 +29,6 @@ GENERATOR_WIDTH=16
 PER_PROBE_MLP="mlp2"
 PER_PROBE_MLP_WIDTH=256
 PER_PROBE_OUT_DIM=4
-INCLUDE_HIDDEN=false
 R_PER_HIDDEN=2
 
 BATCH_SIZE=64
@@ -47,6 +53,7 @@ CIFAR_EXTRA_AUG=20
 CIFAR_CACHE_MODELS=false
 
 python "${MAIN_PY}" \
+  --method probegen \
     --exp_name="${EXP_NAME}" \
     --task=classification \
     --dataset="${DATASET}" \
@@ -54,7 +61,7 @@ python "${MAIN_PY}" \
     --num_seeds="${NUM_SEEDS}" \
     --epochs="${EPOCHS}" \
     --batch_size="${BATCH_SIZE}" \
-    --n_tokens="${N_TOKENS}" \
+    --n_probes="${N_TOKENS}" \
     --d_hid="${D_HID}" \
     --mixer_n_layers="${MIXER_LAYERS}" \
     --gen_type="${GEN_TYPE}" \
@@ -63,7 +70,6 @@ python "${MAIN_PY}" \
     --per_probe_mlp="${PER_PROBE_MLP}" \
     --per_probe_mlp_width="${PER_PROBE_MLP_WIDTH}" \
     --per_probe_out_dim="${PER_PROBE_OUT_DIM}" \
-    --include_hidden_features="${INCLUDE_HIDDEN}" \
     --r_per_hidden="${R_PER_HIDDEN}" \
     --scheduler="${SCHEDULER}" \
     --plateau_monitor="${PLATEAU_MONITOR}" \
@@ -71,14 +77,14 @@ python "${MAIN_PY}" \
     --plateau_factor="${PLATEAU_FACTOR}" \
     --plateau_min_lr="${PLATEAU_MIN_LR}" \
     --lr="${LR}" \
-    --wd="${WD}" \
+    --weight_decay="${WD}" \
     --eval_every="${EVAL_EVERY}" \
     --n_workers="${N_WORKERS}" \
     --cifar_extra_aug="${CIFAR_EXTRA_AUG}" \
     --cifar_cache_models="${CIFAR_CACHE_MODELS}" \
     --device="${DEVICE}"
 
-SUMMARY="experiments/${DATASET}/runs/${EXP_NAME}/seeds_summary.csv"
+SUMMARY="experiments/classification/${DATASET}/runs/${EXP_NAME}/seeds_summary.csv"
 
 python - <<PY
 import pandas as pd
