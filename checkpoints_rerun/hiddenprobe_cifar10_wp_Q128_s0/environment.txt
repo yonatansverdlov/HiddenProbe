@@ -1,0 +1,9 @@
+python=3.13.2
+torch=2.7.0+cu118
+cuda=11.8
+device=cuda
+target_space=raw
+scheduler=plateau
+metrics_mode=raw
+seed=0
+splits=/home/yonatans/HiddenProbe/data/regression/cifar10_wp/splits.json

@@ -44,7 +44,7 @@ for PROBE_LR in 1e-4 3e-4 6e-4; do
         --lr 3e-4 --probe_lr "$PROBE_LR" --hidden_lr 0 \
         --batch_size 32 --rank_loss_w 0.0 --weight_decay 0.0 \
         --scheduler plateau --plateau_factor "$FACTOR" --plateau_patience "$PATIENCE" --plateau_min_lr 3e-5 \
-        --epochs 150 --eval_every 500 --eval_cnn_bs 256 \
+        --epochs 20 --eval_every 1000 --eval_cnn_bs 256 \
         --seed "$SEED" --skip_test_eval 1 --exp_name "$EXP_NAME" --out_dir "$EXP_DIR"
     done
   done
