@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # ProbeGen CIFAR10-GS baseline.
 # Hyperparameters: jonkahana/ProbeGen, scripts/main_results/
-# cifar10_gs__ProbeGen_{64,128}.sh
-# Both published probe counts use identical settings apart from Q.
-# This merged-repo runner uses seeds 0..4 for consistency with HiddenProbe.
-# Usage: bash scripts/ProbeGen/regression/run_cifar10_gs_regression.sh [64|128]
+# cifar10_gs__ProbeGen_128.sh
+# Q is fixed to 128. This merged-repo runner uses seeds 0..4.
+# Usage: bash scripts/ProbeGen/regression/run_cifar10_gs_regression.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,16 +11,16 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 cd "$REPO_ROOT"
 
 MAIN_PY="${MAIN_PY:-main.py}"
-N_PROBES="${1:-128}"
-case "$N_PROBES" in
-  64|128) ;;
-  *) echo "N_PROBES must be 64 or 128 (got '$N_PROBES')" >&2; exit 2 ;;
-esac
+# All ProbeGen datasets use exactly 128 probes.
+if (( $# != 0 )); then
+  echo "This runner uses exactly 128 probes; do not pass a probe count." >&2
+  exit 2
+fi
 
 # Install or verify the canonical dataset and split before training.
 bash scripts/setup_data/regression_cifar10_gs.sh
 
-EXP_NAME="probegen_cifar10_gs_Q${N_PROBES}_5seeds_original"
+EXP_NAME="probegen_cifar10_gs_Q128_5seeds_original"
 python "$MAIN_PY" \
   --method probegen \
   --task regression \
@@ -29,7 +28,7 @@ python "$MAIN_PY" \
   --exp_name "$EXP_NAME" \
   --seed 0 \
   --num_seeds 5 \
-  --n_probes "$N_PROBES" \
+  --n_probes 128 \
   --d_hid 256 \
   --mixer_n_layers 6 \
   --gen_type deep_linear_6 \

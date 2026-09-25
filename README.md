@@ -19,7 +19,7 @@ pip install -r requirements.txt
 
 Run all commands from the repository root. Each experiment script automatically downloads or prepares the required dataset before training.
 
-Every listed HiddenProbe `run_*.sh` experiment has a corresponding ProbeGen runner at the same relative path under `scripts/ProbeGen/`, including all five MNIST-/AGNews-Transformer thresholds. The ProbeGen runners preserve their own reference-branch hyperparameters and seed settings. For example, run `./scripts/ProbeGen/classification/run_mnist_inr.sh` or `./scripts/ProbeGen/regression/run_cifar10_wp_regression.sh`.
+Every listed HiddenProbe `run_*.sh` experiment has a corresponding ProbeGen runner at the same relative path under `scripts/ProbeGen/`, including all five MNIST-/AGNews-Transformer thresholds. All ProbeGen runners use exactly **128 probes**, including MNIST-Transformer and AGNews-Transformer (their reference scripts used 256). Other hyperparameters and seed settings follow the respective reference scripts. For example, run `./scripts/ProbeGen/classification/run_mnist_inr.sh` or `./scripts/ProbeGen/regression/run_cifar10_wp_regression.sh`.
 
 ProbeGen Wild Park loads the **same** prebuilt `cnn_cache_{train,val,test}.pt` files as HiddenProbe, from `$PGH_WP_CACHE` or `data/regression/cifar10_wp/wp_cnn_cache/`; setup builds these directly from the archive without extracting individual checkpoints. The ProbeGen augmented CIFAR-10 run preserves its reference configuration of 20 extra augmentations.
 
