@@ -10,6 +10,7 @@ experiments/cnn_generalization/dataset/
 
 # Experiment outputs
 checkpoints/
+/checkpoints_rerun/
 experiments/
 runs/
 wandb/
@@ -31,3 +32,11 @@ args.txt
 /plotting.py
 /sweeps/
 /measurments/
+/measurements/
+
+# Third-party checkouts and submodules
+/third_party/
+
+# Generated PDF/PNG files at repository root; keep figs/ tracked
+/*.pdf
+/*.png
