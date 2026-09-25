@@ -19,11 +19,7 @@ pip install -r requirements.txt
 
 Run all commands from the repository root. Each experiment script automatically downloads or prepares the required dataset before training.
 
-Every listed HiddenProbe `run_*.sh` experiment has a corresponding ProbeGen runner at the same relative path under `scripts/ProbeGen/`, including all five MNIST-/AGNews-Transformer thresholds. All ProbeGen runners use exactly **128 probes**, including MNIST-Transformer and AGNews-Transformer (their reference scripts used 256). Other hyperparameters and seed settings follow the respective reference scripts. For example, run `./scripts/ProbeGen/classification/run_mnist_inr.sh` or `./scripts/ProbeGen/regression/run_cifar10_wp_regression.sh`.
-
-ProbeGen Wild Park loads the **same** prebuilt `cnn_cache_{train,val,test}.pt` files as HiddenProbe, from `$PGH_WP_CACHE` or `data/regression/cifar10_wp/wp_cnn_cache/`; setup builds these directly from the archive without extracting individual checkpoints. The ProbeGen augmented CIFAR-10 run preserves its reference configuration of 20 extra augmentations.
-
-## Running the experiments
+## HiddenProbe experiments
 
 ### INR classification
 
@@ -105,6 +101,94 @@ For MNIST-Transformers and AGNews-Transformers we report five accuracy-threshold
 ./scripts/HiddenProbe/regression/run_agnews_transformer_thresh40.sh
 ./scripts/HiddenProbe/regression/run_agnews_transformer_thresh60.sh
 ./scripts/HiddenProbe/regression/run_agnews_transformer_thresh80.sh
+```
+
+## ProbeGen experiments
+
+All ProbeGen runs use **128 probes**. The MNIST-/Fashion-MNIST-INR scripts retain the original single seed (seed 1); the other INR/CNN scripts and each Transformer threshold run five seeds. The Transformer reference scripts used 256 probes; the runners below use 128 as specified for this repository.
+
+Each runner prepares or verifies its dataset before training. For CIFAR-10 Wild Park, ProbeGen reuses the **same** prebuilt `cnn_cache_{train,val,test}.pt` files as HiddenProbe, from `$PGH_WP_CACHE` or `data/regression/cifar10_wp/wp_cnn_cache/`, without extracting individual checkpoints. The augmented CIFAR-10 ProbeGen run uses 20 additional INR realizations as in its source script.
+
+### INR classification
+
+**MNIST-INR**
+
+```bash
+./scripts/ProbeGen/classification/run_mnist_inr.sh
+```
+
+**Fashion-MNIST-INR**
+
+```bash
+./scripts/ProbeGen/classification/run_fmnist_inr.sh
+```
+
+**CIFAR-10-INR**
+
+```bash
+./scripts/ProbeGen/classification/run_cifar10_inr_nonaug.sh
+```
+
+**CIFAR-10-INR augmented**
+
+```bash
+./scripts/ProbeGen/classification/run_cifar10_inr_aug.sh
+```
+
+### CNN accuracy prediction
+
+**MNIST**
+
+```bash
+./scripts/ProbeGen/regression/run_mnist_regression.sh
+```
+
+**Fashion-MNIST**
+
+```bash
+./scripts/ProbeGen/regression/run_fmnist_regression.sh
+```
+
+**SVHN**
+
+```bash
+./scripts/ProbeGen/regression/run_svhn_regression.sh
+```
+
+**CIFAR-10 Gray Scale**
+
+```bash
+./scripts/ProbeGen/regression/run_cifar10_gs_regression.sh
+```
+
+**CIFAR-10 Wild Park**
+
+```bash
+./scripts/ProbeGen/regression/run_cifar10_wp_regression.sh
+```
+
+### Transformer accuracy prediction
+
+Run each threshold separately (0%, 20%, 40%, 60%, 80%). Each threshold script trains five seeds and reuses the threshold-specific dataset cache.
+
+**MNIST-Transformers**
+
+```bash
+./scripts/ProbeGen/regression/run_mnist_transformer_thresh0.sh
+./scripts/ProbeGen/regression/run_mnist_transformer_thresh20.sh
+./scripts/ProbeGen/regression/run_mnist_transformer_thresh40.sh
+./scripts/ProbeGen/regression/run_mnist_transformer_thresh60.sh
+./scripts/ProbeGen/regression/run_mnist_transformer_thresh80.sh
+```
+
+**AGNews-Transformers**
+
+```bash
+./scripts/ProbeGen/regression/run_agnews_transformer_thresh0.sh
+./scripts/ProbeGen/regression/run_agnews_transformer_thresh20.sh
+./scripts/ProbeGen/regression/run_agnews_transformer_thresh40.sh
+./scripts/ProbeGen/regression/run_agnews_transformer_thresh60.sh
+./scripts/ProbeGen/regression/run_agnews_transformer_thresh80.sh
 ```
 
 ## Repository structure
