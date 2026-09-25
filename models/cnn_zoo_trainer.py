@@ -97,7 +97,7 @@ ap.add_argument("--n_train", type=int, default=0, help="0=all 113586")
 ap.add_argument("--epochs", type=int, default=30)
 ap.add_argument("--batch_size", type=int, default=32)
 ap.add_argument("--lr", type=float, default=3e-4, help="readout lr (Kahana WP default 3e-4)")
-ap.add_argument("--probe_lr", type=float, default=3e-4, help="lr for latents+generator")
+ap.add_argument("--probe_lr", type=float, default=0.0, help="0 (default) uses --lr; otherwise LR for latents+generator")
 ap.add_argument("--hidden_lr", type=float, default=0.0,
                 help="0 = no separation (hidden-branch readout uses --lr). >0 = SEPARATE lr for the hidden "
                      "branch (tokenizer/encoder/interaction/fusion) vs the output/Kahana readout (--lr). "
@@ -184,6 +184,8 @@ ap.add_argument("--probe_min_lr", type=float, default=-1.0,
                      "optimizer group). Use when probe_lr < plateau_min_lr so ReduceLROnPlateau does not "
                      "raise the probe LR up to plateau_min_lr. <0 = use scalar --plateau_min_lr (UNCHANGED).")
 args = ap.parse_args()
+if args.probe_lr == 0:
+    args.probe_lr = args.lr
 if args.probe_dropout > 0.0 and args.probe_sharing != "shared":
     print(f"[ABORT] --probe_dropout {args.probe_dropout} requires --probe_sharing shared (got "
           f"{args.probe_sharing}): masks must align across the shared output/hidden probe bank.", flush=True)

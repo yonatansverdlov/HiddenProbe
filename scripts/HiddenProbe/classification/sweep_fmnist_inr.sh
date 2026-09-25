@@ -87,7 +87,6 @@ run_common_args() {
         --plateau_factor="$factor" \
         --plateau_min_lr="$PLATEAU_MIN_LR" \
         --lr="$lr" \
-        --probe_lr="$lr" \
         --weight_decay="$WEIGHT_DECAY" \
         --eval_every="$EVAL_EVERY" \
         --n_workers="$N_WORKERS" \

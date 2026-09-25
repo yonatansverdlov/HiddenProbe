@@ -38,7 +38,6 @@ python "$MAIN_PY" \
   --per_probe_mlp none \
   --batch_size 32 \
   --lr 3e-4 \
-  --probe_lr 3e-4 \
   --scheduler cosine \
   --plateau_monitor val_tau \
   --weight_decay 0.0 \

@@ -386,7 +386,7 @@ parser.add_argument(
 
 # Number of learned probes.
 parser.add_argument("--n_probes", type=int, default=128)
-parser.add_argument("--d_hid", type=int, default=256)
+parser.add_argument("--d_hid", type=int, default=314)
 parser.add_argument("--mixer_n_layers", type=int, default=6)
 
 # Probe generator. If omitted, choose the natural default for the task:
@@ -429,8 +429,8 @@ parser.add_argument("--lr", type=float, default=3e-4)
 parser.add_argument(
     "--probe_lr",
     type=float,
-    default=None,
-    help="Learning rate for the trainable probe source. Default: same as --lr.",
+    default=0.0,
+    help="0 (default): use --lr; a positive value sets a separate probe learning rate."
 )
 parser.add_argument("--weight_decay", type=float, default=0.0)
 parser.add_argument("--epochs", type=int, default=20)
@@ -459,7 +459,7 @@ args = parser.parse_args()
 # Historically the canonical trainer used one Adam group, so probe parameters
 # always had exactly the same LR as the rest of the model. Keep that behavior
 # as the default while exposing it explicitly for reproducible sweeps.
-if args.probe_lr is None:
+if args.probe_lr == 0:
     args.probe_lr = args.lr
 
 # The method selects the model semantics in this backend. ProbeGen is always

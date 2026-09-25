@@ -66,7 +66,7 @@ ap.add_argument("--gen_type", default="linear_2_no_acts"); ap.add_argument("--ge
 ap.add_argument("--generator_width", type=int, default=16)
 ap.add_argument("--n_probes", type=int, default=128, help="number of learned probes (was hardcoded NP=128); model dims auto-scale.")
 ap.add_argument("--domain_tanh", type=int, default=1, help="1 = squash learned probe coords to (-1,1)^d (recommended)")
-ap.add_argument("--probe_lr", type=float, default=1e-2, help="LR for the learned probe generator (the big lever)")
+ap.add_argument("--probe_lr", type=float, default=0.0, help="0 (default) uses --lr; otherwise LR for the learned probe generator")
 # ---- optimization ----
 ap.add_argument("--lr", type=float, default=5e-4); ap.add_argument("--epochs", type=int, default=50)
 ap.add_argument("--batch_size", type=int, default=32); ap.add_argument("--warmup", type=int, default=300)
@@ -96,6 +96,8 @@ ap.add_argument("--readout", default="cls", choices=["cls", "pma", "multi"], hel
 ap.add_argument("--pma_seeds", type=int, default=1, help="readout=pma: number of learned pooling seed queries "
                 "(K); readout is K*d wide -> less information bottleneck than a single CLS/PMA vector.")
 args = ap.parse_args()
+if args.probe_lr == 0:
+    args.probe_lr = args.lr
 NP = args.n_probes   # override the module default (128) with the CLI value
 DEV = "cuda"; L, H, OUT = args.L, args.H, args.out_dim
 DS_DIR = args.dataset_dir or os.path.join(ROOT, "experiments", "inr_classification", "dataset")

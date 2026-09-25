@@ -39,7 +39,7 @@ run_one() {
         --n_probes "$Q" --domain_tanh 1 \
         --head set_transformer --d 120 --nenc 2 --nheads 8 \
         --ema_decay 0.999 \
-        --lr "$lr" --probe_lr "$lr" \
+        --lr "$lr" \
         --batch_size 32 --warmup 300 --dropout 0.1 --head_wd 0.1 \
         --scheduler plateau --plateau_factor "$factor" \
         --plateau_patience "$patience" --plateau_min_lr 1e-6 \
