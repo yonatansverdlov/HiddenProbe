@@ -1,7 +1,0 @@
-method,dataset,split,targets,batch_size,seed,precision,params,trainable_params,target_queries,data_seconds,build_seconds,forward_seconds,total_seconds,note
-probegen,MNIST INR classification,train,55000,32,0,bf16,403824,403824,128,75.076985,0.013482,34.03143,109.122038,"Original architecture, random initialization"
-hiddenprobe,MNIST INR classification,train,55000,32,0,bf16,405988,405988,128,95.657601,0.014891,59.835161,155.507854,ProbeGen core with hidden features
-dws,MNIST INR classification,train,55000,32,0,bf16,552650,552650,0,104.131645,0.123977,70.506117,174.765683,"Original architecture, random initialization"
-nfn,MNIST INR classification,train,55000,32,0,bf16,68844330,68844330,0,73.044278,6.610826,11.099475,90.755053,"Original architecture, random initialization"
-nft,MNIST INR classification,train,55000,32,0,bf16,21241610,21241610,0,95.353708,4.293244,65.125369,164.774061,Original INR2Array NFT encoder + untrained linear timing head
-mlp,MNIST INR classification,train,55000,32,0,bf16,42762,42762,0,102.045461,0.012705,1.402533,103.460824,"Original architecture, random initialization"
