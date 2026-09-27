@@ -10,7 +10,7 @@ HiddenProbe learns representations of neural networks by evaluating learned prob
 
 ```bash
 cd HiddenProbe
-
+git clone https://github.com/yonatansverdlov/HiddenProbe.git
 conda create -n hiddenprobe python=3.11
 conda activate hiddenprobe
 pip install -r requirements.txt
