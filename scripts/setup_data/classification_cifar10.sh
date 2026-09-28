@@ -132,82 +132,42 @@ else
     log "CIFAR10 INR archive download complete."
 fi
 
-log "Step 3: preparing a clean extraction workspace."
-PARENT="$DATA_ROOT/classification"
-TMP_PREFIX=".cifar10_inr_extract."
-cleanup_stale_extract_dirs "$PARENT" "$TMP_PREFIX"
-
-create_tmp() {
-    log "Creating temporary extraction directory..."
-    TMP="$(mktemp -d "$PARENT/${TMP_PREFIX}XXXXXX")"
-    log "Temporary extraction directory: $TMP"
-}
-
-create_tmp
-trap 'rm -rf "${TMP:-}"' EXIT
-
-log "Step 4: Extracting CIFAR10 SIREN weights..."
+log "Step 3: extracting CIFAR10 SIREN weights directly into final target."
+rm -rf "$TARGET"
+mkdir -p "$TARGET"
 log "Extraction may take some time."
 
-if tar -xf "$ARCHIVE" -C "$TMP"; then
-    log "Extraction complete."
-else
-    log "Extraction failed."
-    log "Assuming the existing archive is corrupted or incomplete."
-
-    log "Removing failed extraction directory..."
-    rm -rf "$TMP"
-    log "Failed extraction directory removed."
-
-    log "Deleting bad archive..."
+if ! tar -xf "$ARCHIVE" -C "$TARGET"; then
+    log "Extraction failed; assuming the archive is corrupted or incomplete."
+    rm -rf "$TARGET"
     rm -f "$ARCHIVE" "${ARCHIVE}.part"
-    log "Bad archive deleted."
 
     log "Downloading CIFAR10 SIREN weights again from scratch..."
     download_gdrive "$GDRIVE_FILE_ID" "$ARCHIVE"
-    log "CIFAR10 INR archive re-download complete."
 
-    log "Preparing a fresh extraction directory..."
-    create_tmp
-
-    log "Retrying extraction..."
-    if ! tar -xf "$ARCHIVE" -C "$TMP"; then
-        log "Second extraction attempt failed."
-        log "Deleting the newly downloaded archive because it cannot be extracted."
+    mkdir -p "$TARGET"
+    if ! tar -xf "$ARCHIVE" -C "$TARGET"; then
+        rm -rf "$TARGET"
         rm -f "$ARCHIVE" "${ARCHIVE}.part"
         die "CIFAR10 INR extraction failed twice."
     fi
-
-    log "Extraction complete on second attempt."
 fi
 
-log "Step 5: locating extracted CIFAR10 INR data."
-FIRST_PTH="$(find "$TMP" -type f -name '*.pth' -print -quit)"
-if [[ -z "$FIRST_PTH" ]]; then
-    die "Extraction completed, but no .pth checkpoints were found."
-fi
-log "Found extracted checkpoint: $FIRST_PTH"
-
-SRC="$(find "$TMP" -type d -name 'siren_cifar_wts' -print -quit)"
-if [[ -n "$SRC" ]]; then
-    log "Detected archive dataset root: $SRC"
-else
-    PTH_DIR="$(dirname "$FIRST_PTH")"
-    SRC="$(dirname "$PTH_DIR")"
-    log "siren_cifar_wts directory name was not found explicitly."
-    log "Using inferred dataset root: $SRC"
+# The archive may wrap the zoo in a siren_cifar_wts/ directory. Flatten it
+# in-place so the canonical target contains randinit_smaller_* directly.
+SRC="$TARGET/siren_cifar_wts"
+if [[ -d "$SRC" ]]; then
+    shopt -s dotglob nullglob
+    items=("$SRC"/*)
+    if (( ${#items[@]} > 0 )); then
+        mv -- "${items[@]}" "$TARGET"/
+    fi
+    shopt -u dotglob nullglob
+    rmdir "$SRC" 2>/dev/null || true
 fi
 
-log "Step 6: installing extracted CIFAR10 INR files."
-log "Removing incomplete previous target contents..."
-rm -rf "$TARGET"
-log "Old target contents removed."
-
-log "Creating final target directory..."
-mkdir -p "$TARGET"
-log "Moving extracted dataset contents into final target..."
-cp -a "$SRC"/. "$TARGET"/
-log "CIFAR10 INR files installed."
+find "$TARGET" -type f -name '*.pth' -print -quit 2>/dev/null | grep -q . \
+    || die "Extraction completed, but no .pth checkpoints were found."
 
 log "Step 7: running final dataset sanity check."
 find "$TARGET" -type f -name '*.pth' -print -quit 2>/dev/null | grep -q . \
