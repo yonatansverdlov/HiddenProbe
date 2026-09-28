@@ -291,7 +291,9 @@ class CNNZooRegressionDataset(torch.utils.data.Dataset):
         return len(self.raw_idcs)
 
     def _decode_parameters(self, raw_idx: int):
-        flat = np.asarray(self.data[raw_idx], dtype=np.float32)
+        # Copy the read-only memmap row once so all parameter views are writable.
+        # This avoids PyTorch warnings/undefined behavior in torch.from_numpy.
+        flat = np.array(self.data[raw_idx], dtype=np.float32, copy=True)
 
         weights = []
         biases = []
