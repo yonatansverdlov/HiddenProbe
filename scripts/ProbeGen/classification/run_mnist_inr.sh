@@ -19,6 +19,10 @@ python main.py \
   --mixer_n_layers=6 \
   \
   --gen_type=linear_2_no_acts \
+  --per_probe_mlp=mlp2 \
+  --per_probe_mlp_width=256 \
+  --per_probe_out_dim=4 \
+  --per_probe_init=standard \
   \
   --batch_size=32 \
   --lr=0.0003 \
