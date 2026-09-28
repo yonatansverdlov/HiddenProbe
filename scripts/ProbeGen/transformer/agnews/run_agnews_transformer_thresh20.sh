@@ -26,6 +26,7 @@ for SEED in "${SEEDS[@]}"; do
   RUNS="${PREFIX}_s${SEED}"
   if [[ ! -s "$RUNS/last.pt" ]]; then
     python "$MAIN_PY" transformer train \
+      --method probegen \
       --dataset agnews --generator g3 --n_classes 4 --ffn 0 \
       --n_probes 128 --readout multi --pma_seeds 4 --readout_arch rout \
       --cut_off "$CUT" \
