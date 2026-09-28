@@ -2,15 +2,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 cd "$REPO_ROOT"
 
 DATA_ROOT="${DATA_ROOT:-data}"
-CUT="0.0"
+CUT="0.8"
 NUM_SEEDS=5
 
-# Threshold-specific selected configuration from the latest HiddenProbe reference branch.
-PRED_LR=5e-4
+# Threshold-specific selected configuration from the HiddenProbe reference branch.
+PRED_LR=2.5e-4
 GEN_LR=1e-3
 DROPOUT=0.1
 
@@ -27,7 +27,7 @@ python main.py transformer cache \
 
 RUN_DIRS=()
 for ((SEED=0; SEED<NUM_SEEDS; SEED++)); do
-  RUNS="checkpoints/hiddenprobe_agnews_transformer_thresh0_s${SEED}"
+  RUNS="checkpoints/hiddenprobe_agnews_transformer_thresh80_s${SEED}"
 
   if [[ ! -s "$RUNS/last.pt" ]]; then
     python main.py transformer train \

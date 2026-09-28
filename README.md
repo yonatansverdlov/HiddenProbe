@@ -87,21 +87,21 @@ For MNIST-Transformers and AGNews-Transformers we report five accuracy-threshold
 **MNIST-Transformers**
 
 ```bash
-./scripts/HiddenProbe/regression/run_mnist_transformer_thresh0.sh
-./scripts/HiddenProbe/regression/run_mnist_transformer_thresh20.sh
-./scripts/HiddenProbe/regression/run_mnist_transformer_thresh40.sh
-./scripts/HiddenProbe/regression/run_mnist_transformer_thresh60.sh
-./scripts/HiddenProbe/regression/run_mnist_transformer_thresh80.sh
+./scripts/HiddenProbe/transformer/mnist/run_mnist_transformer_thresh0.sh
+./scripts/HiddenProbe/transformer/mnist/run_mnist_transformer_thresh20.sh
+./scripts/HiddenProbe/transformer/mnist/run_mnist_transformer_thresh40.sh
+./scripts/HiddenProbe/transformer/mnist/run_mnist_transformer_thresh60.sh
+./scripts/HiddenProbe/transformer/mnist/run_mnist_transformer_thresh80.sh
 ```
 
 **AGNews-Transformers**
 
 ```bash
-./scripts/HiddenProbe/regression/run_agnews_transformer_thresh0.sh
-./scripts/HiddenProbe/regression/run_agnews_transformer_thresh20.sh
-./scripts/HiddenProbe/regression/run_agnews_transformer_thresh40.sh
-./scripts/HiddenProbe/regression/run_agnews_transformer_thresh60.sh
-./scripts/HiddenProbe/regression/run_agnews_transformer_thresh80.sh
+./scripts/HiddenProbe/transformer/agnews/run_agnews_transformer_thresh0.sh
+./scripts/HiddenProbe/transformer/agnews/run_agnews_transformer_thresh20.sh
+./scripts/HiddenProbe/transformer/agnews/run_agnews_transformer_thresh40.sh
+./scripts/HiddenProbe/transformer/agnews/run_agnews_transformer_thresh60.sh
+./scripts/HiddenProbe/transformer/agnews/run_agnews_transformer_thresh80.sh
 ```
 
 ## ProbeGen experiments
@@ -175,21 +175,21 @@ Run each threshold separately (0%, 20%, 40%, 60%, 80%). Each threshold script tr
 **MNIST-Transformers**
 
 ```bash
-./scripts/ProbeGen/regression/run_mnist_transformer_thresh0.sh
-./scripts/ProbeGen/regression/run_mnist_transformer_thresh20.sh
-./scripts/ProbeGen/regression/run_mnist_transformer_thresh40.sh
-./scripts/ProbeGen/regression/run_mnist_transformer_thresh60.sh
-./scripts/ProbeGen/regression/run_mnist_transformer_thresh80.sh
+./scripts/ProbeGen/transformer/mnist/run_mnist_transformer_thresh0.sh
+./scripts/ProbeGen/transformer/mnist/run_mnist_transformer_thresh20.sh
+./scripts/ProbeGen/transformer/mnist/run_mnist_transformer_thresh40.sh
+./scripts/ProbeGen/transformer/mnist/run_mnist_transformer_thresh60.sh
+./scripts/ProbeGen/transformer/mnist/run_mnist_transformer_thresh80.sh
 ```
 
 **AGNews-Transformers**
 
 ```bash
-./scripts/ProbeGen/regression/run_agnews_transformer_thresh0.sh
-./scripts/ProbeGen/regression/run_agnews_transformer_thresh20.sh
-./scripts/ProbeGen/regression/run_agnews_transformer_thresh40.sh
-./scripts/ProbeGen/regression/run_agnews_transformer_thresh60.sh
-./scripts/ProbeGen/regression/run_agnews_transformer_thresh80.sh
+./scripts/ProbeGen/transformer/agnews/run_agnews_transformer_thresh0.sh
+./scripts/ProbeGen/transformer/agnews/run_agnews_transformer_thresh20.sh
+./scripts/ProbeGen/transformer/agnews/run_agnews_transformer_thresh40.sh
+./scripts/ProbeGen/transformer/agnews/run_agnews_transformer_thresh60.sh
+./scripts/ProbeGen/transformer/agnews/run_agnews_transformer_thresh80.sh
 ```
 
 ## Repository structure
@@ -197,8 +197,8 @@ Run each threshold separately (0%, 20%, 40%, 60%, 80%). Each threshold script tr
 ```text
 main.py                         Main experiment entry point
 models/                         HiddenProbe models and trainers
-scripts/HiddenProbe/            HiddenProbe experiments and sweeps
-scripts/ProbeGen/               ProbeGen experiment runners
+scripts/HiddenProbe/            HiddenProbe experiment runners (classification, regression, transformer)
+scripts/ProbeGen/               ProbeGen experiment runners (classification, regression, transformer)
 scripts/setup_data/             Automatic dataset download and preparation
 ```
 

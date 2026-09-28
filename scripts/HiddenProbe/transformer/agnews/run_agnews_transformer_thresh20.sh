@@ -2,38 +2,38 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 cd "$REPO_ROOT"
 
 DATA_ROOT="${DATA_ROOT:-data}"
-CUT="0.8"
+CUT="0.2"
 NUM_SEEDS=5
 
 # Threshold-specific selected configuration from the HiddenProbe reference branch.
 PRED_LR=2.5e-4
-GEN_LR=5e-4
-DROPOUT=0.2
+GEN_LR=1e-3
+DROPOUT=0.1
 
-bash scripts/setup_data/regression_mnist_transformer.sh
+bash scripts/setup_data/regression_agnews_transformer.sh
 
 # Transformer-NFN threshold protocol:
 # filter epoch-75 models by absolute accuracy first, then make a fresh
 # deterministic 70/15/15 split for this threshold.
 python main.py transformer cache \
-  --dataset mnist \
+  --dataset agnews \
   --seed 0 \
   --cut_off "$CUT" \
   --data_root "$DATA_ROOT"
 
 RUN_DIRS=()
 for ((SEED=0; SEED<NUM_SEEDS; SEED++)); do
-  RUNS="checkpoints/hiddenprobe_mnist_transformer_thresh80_s${SEED}"
+  RUNS="checkpoints/hiddenprobe_agnews_transformer_thresh20_s${SEED}"
 
   if [[ ! -s "$RUNS/last.pt" ]]; then
     python main.py transformer train \
-      --dataset mnist \
+      --dataset agnews \
       --generator g3 \
-      --n_classes 10 \
+      --n_classes 4 \
       --ffn 384 \
       --n_probes 256 \
       --readout multi \
