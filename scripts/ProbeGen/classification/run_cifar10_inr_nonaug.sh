@@ -11,7 +11,7 @@ MAIN_PY="${MAIN_PY:-main.py}"
 
 
 DATASET="cifar10"
-EXP_NAME="cifar10_nonaug_mlp2_dhid318_FINAL_5SEEDS_30E_plateau_lr7e-4_pat3_fac0.2"
+EXP_NAME="cifar10_nonaug_mlp2_dhid318_FINAL_5SEEDS_60E_plateau_lr7e-4_pat3_fac0.2"
 
 N_TOKENS=128
 D_HID=318
@@ -27,7 +27,7 @@ PER_PROBE_OUT_DIM=4
 R_PER_HIDDEN=2
 
 BATCH_SIZE=64
-EPOCHS=30
+EPOCHS=60
 NUM_SEEDS=5
 START_SEED=0
 
