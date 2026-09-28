@@ -12,6 +12,46 @@ SPLIT="$TARGET/mnist_splits.json"
 ARCHIVE_URL="https://www.dropbox.com/scl/fo/2akm78f7ot4o52o1mrtun/ADLLU8zOj73tswlhhCR_yF8/mnist-inrs.zip?rlkey=4oj9ao6om06tgmfabyctzu2n2&e=1&dl=1"
 SPLIT_URL="https://raw.githubusercontent.com/jonkahana/ProbeGen/main/experiments/inr_classification/dataset/mnist_splits.json"
 
+
+extract_mnist_checkpoints_with_progress() {
+    local archive="$1"
+    local dest="$2"
+    local pattern='mnist-inrs/*/checkpoints/model_final.pth'
+
+    local total
+    total="$(unzip -Z1 "$archive" "$pattern" 2>/dev/null | wc -l | tr -d '[:space:]')"
+    [[ -n "$total" && "$total" -gt 0 ]] || return 1
+
+    log "MNIST INR checkpoints: $total files"
+
+    local awk_program='
+        BEGIN { width=40; count=0; last=-1 }
+        /(^|[[:space:]])(inflating:|extracting:)/ {
+            count++
+            pct=int((count*100)/total)
+            if (pct>100) pct=100
+            if (pct != last) {
+                filled=int(width*pct/100)
+                bar=""
+                for (i=0; i<filled; i++) bar=bar "#"
+                for (i=filled; i<width; i++) bar=bar "-"
+                printf "\r[setup] MNIST INR extraction: [%s] %3d%% (%d/%d)", bar, pct, count, total > "/dev/stderr"
+                fflush("/dev/stderr")
+                last=pct
+            }
+        }
+        END {
+            if (count > 0) {
+                printf "\n" > "/dev/stderr"
+                fflush("/dev/stderr")
+            }
+        }
+    '
+
+    unzip -o "$archive" "$pattern" -d "$dest" 2>&1 \
+        | awk -v total="$total" "$awk_program"
+}
+
 log "============================================================"
 log "MNIST INR classification dataset setup"
 log "Target: $TARGET"
@@ -52,7 +92,7 @@ create_tmp
 trap 'rm -rf "${TMP:-}"' EXIT
 
 log "Extracting MNIST INR checkpoints only."
-if ! unzip -q "$ARCHIVE" 'mnist-inrs/*/checkpoints/model_final.pth' -d "$TMP"; then
+if ! extract_mnist_checkpoints_with_progress "$ARCHIVE" "$TMP"; then
     log "Extraction failed; treating the archive as corrupt/incomplete."
     rm -rf "$TMP"
     rm -f "$ARCHIVE" "${ARCHIVE}.part"
@@ -61,7 +101,7 @@ if ! unzip -q "$ARCHIVE" 'mnist-inrs/*/checkpoints/model_final.pth' -d "$TMP"; t
     download_url "$ARCHIVE_URL" "$ARCHIVE"
 
     create_tmp
-    if ! unzip -q "$ARCHIVE" 'mnist-inrs/*/checkpoints/model_final.pth' -d "$TMP"; then
+    if ! extract_mnist_checkpoints_with_progress "$ARCHIVE" "$TMP"; then
         rm -f "$ARCHIVE" "${ARCHIVE}.part"
         die "MNIST INR extraction failed twice."
     fi
