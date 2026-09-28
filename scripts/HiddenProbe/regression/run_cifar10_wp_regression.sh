@@ -10,7 +10,7 @@ bash scripts/setup_data/regression_cifar10_wp.sh
 MAIN_PY="${MAIN_PY:-main.py}"
 DATA_ROOT="${DATA_ROOT:-$REPO_ROOT/data}"
 N_PROBES="${1:-128}"
-NUM_SEEDS=1
+NUM_SEEDS=5
 OUT_ROOT="${OUT_DIR:-checkpoints}"
 
 WP_DIR="${WP_DIR:-$DATA_ROOT/regression/cifar10_wp}"
