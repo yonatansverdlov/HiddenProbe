@@ -134,14 +134,12 @@ def _run(module: str, argv: List[str]) -> None:
 def _route_core(method: str, task: str, dataset: str, argv: List[str]) -> None:
     # This backend owns ALL ProbeGen runs, plus HiddenProbe MNIST/FMNIST classification.
     #
-    # MNIST/FMNIST INR samples are reconstructed as nn.Module objects. Sending
-    # those modules through multiprocessing queues creates many shared-memory
-    # tensor mappings, so these two datasets must stay in the main process.
-    # Other datasets use the CPUs actually available to this process.
-    if task == "classification" and dataset in {"mnist", "fmnist"}:
-        n_workers = 0
-    else:
-        n_workers = _available_cpu_workers()
+    # Every core dataset reconstructs target networks as nn.Module objects inside
+    # Dataset.__getitem__. Passing those modules through multiprocessing queues
+    # creates many shared-memory tensor mappings and can exhaust mmap/shared-memory
+    # resources even when plenty of GPU memory is available. Keep core loading in
+    # the main process for all datasets.
+    n_workers = 0
 
     forwarded = _drop_flags(argv, {"method", "task", "dataset", "n_workers"})
     forwarded = [
