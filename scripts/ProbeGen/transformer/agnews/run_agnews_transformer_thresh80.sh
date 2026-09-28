@@ -16,7 +16,7 @@ CUT_PCT=80
 SEEDS=("$@")
 if (( ${#SEEDS[@]} == 0 )); then SEEDS=(0 1 2 3 4); fi
 
-bash scripts/setup_data/regression_agnews_transformer.sh
+bash scripts/setup_data/transformer_agnews.sh
 python "$MAIN_PY" transformer cache \
   --dataset agnews --seed 0 --cut_off "$CUT" --data_root "$DATA_ROOT"
 
