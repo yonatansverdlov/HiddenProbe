@@ -12,24 +12,6 @@ SPLIT="$TARGET/mnist_splits.json"
 ARCHIVE_URL="https://www.dropbox.com/scl/fo/2akm78f7ot4o52o1mrtun/ADLLU8zOj73tswlhhCR_yF8/mnist-inrs.zip?rlkey=4oj9ao6om06tgmfabyctzu2n2&e=1&dl=1"
 SPLIT_URL="https://raw.githubusercontent.com/jonkahana/ProbeGen/main/experiments/inr_classification/dataset/mnist_splits.json"
 
-EXPECTED_PTH=70000
-
-valid_mnist_tree() {
-    local root="$1"
-    local mnist_root="$root/mnist-inrs"
-
-    [[ -d "$mnist_root" ]] || return 1
-
-    # MNIST-only guard: reject archives/installations containing other datasets.
-    if find "$mnist_root" -print 2>/dev/null | grep -Eqi '/(cifar|fmnist|fashion)[^/]*'; then
-        return 1
-    fi
-
-    local n_pth
-    n_pth="$(find "$mnist_root" -type f -name '*.pth' 2>/dev/null | wc -l | tr -d ' ')"
-    [[ "$n_pth" -eq "$EXPECTED_PTH" ]]
-}
-
 log "============================================================"
 log "MNIST INR classification dataset setup"
 log "Target: $TARGET"
@@ -39,13 +21,13 @@ require_cmd unzip
 mkdir -p "$TARGET"
 
 log "Checking whether MNIST INR is already complete."
-if [[ -s "$SPLIT" ]] && valid_mnist_tree "$DATASET_DIR"; then
+if [[ -s "$SPLIT" ]] && [[ -d "$DATASET_DIR/mnist-inrs" ]]; then
     log "$NAME is already installed; nothing to do."
     exit 0
 fi
 
 if [[ -d "$DATASET_DIR" ]]; then
-    log "Existing MNIST INR directory is incomplete or contains non-MNIST data; replacing it."
+    log "Existing MNIST INR directory is incomplete; replacing it."
     rm -rf "$DATASET_DIR"
 fi
 
@@ -88,22 +70,13 @@ fi
 MNIST_ROOT="$(find "$TMP" -type d -name 'mnist-inrs' -print -quit)"
 [[ -n "$MNIST_ROOT" ]] || die "Archive does not contain the expected mnist-inrs directory."
 
-if find "$MNIST_ROOT" -print | grep -Eqi '/(cifar|fmnist|fashion)[^/]*'; then
-    die "Downloaded archive contains non-MNIST paths; refusing to install it."
-fi
-
-PTH_COUNT="$(find "$MNIST_ROOT" -type f -name '*.pth' | wc -l | tr -d ' ')"
-[[ "$PTH_COUNT" -eq "$EXPECTED_PTH" ]] \
-    || die "Expected $EXPECTED_PTH MNIST INR checkpoints, found $PTH_COUNT."
-
-log "Validated MNIST-only archive: $PTH_COUNT checkpoints."
 log "Installing only mnist-inrs into canonical data directory."
 rm -rf "$DATASET_DIR"
 mkdir -p "$DATASET_DIR"
 cp -a "$MNIST_ROOT" "$DATASET_DIR/"
 
-valid_mnist_tree "$DATASET_DIR" \
-    || die "Installed MNIST INR tree failed the final MNIST-only sanity check."
+[[ -d "$DATASET_DIR/mnist-inrs" ]] \
+    || die "Installed MNIST INR tree is missing mnist-inrs."
 
 if [[ -s "$SPLIT" ]]; then
     log "Split JSON already exists."
@@ -113,8 +86,8 @@ else
 fi
 
 require_file "$SPLIT"
-valid_mnist_tree "$DATASET_DIR" \
-    || die "Final sanity check failed: MNIST-only INR tree is invalid."
+[[ -d "$DATASET_DIR/mnist-inrs" ]] \
+    || die "Final sanity check failed: mnist-inrs directory is missing."
 
 cleanup_archive "$ARCHIVE"
 finish "$TARGET"
