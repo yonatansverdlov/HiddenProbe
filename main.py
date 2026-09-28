@@ -133,14 +133,22 @@ def _run(module: str, argv: List[str]) -> None:
 
 def _route_core(method: str, task: str, dataset: str, argv: List[str]) -> None:
     # This backend owns ALL ProbeGen runs, plus HiddenProbe MNIST/FMNIST classification.
-    # main.py owns DataLoader worker selection: use the CPUs actually available
-    # to this process and ignore stale/hard-coded --n_workers values in scripts.
+    #
+    # MNIST/FMNIST INR samples are reconstructed as nn.Module objects. Sending
+    # those modules through multiprocessing queues creates many shared-memory
+    # tensor mappings, so these two datasets must stay in the main process.
+    # Other datasets use the CPUs actually available to this process.
+    if task == "classification" and dataset in {"mnist", "fmnist"}:
+        n_workers = 0
+    else:
+        n_workers = _available_cpu_workers()
+
     forwarded = _drop_flags(argv, {"method", "task", "dataset", "n_workers"})
     forwarded = [
         "--method", method,
         "--task", task,
         "--dataset", dataset,
-        "--n_workers", str(_available_cpu_workers()),
+        "--n_workers", str(n_workers),
     ] + forwarded
     _run("models.probegen_core_trainer", forwarded)
 
