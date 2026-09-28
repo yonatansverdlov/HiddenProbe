@@ -329,7 +329,7 @@ def infer_inr_arch(state_dict):
 
 
 class INRDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset_dir, splits_path, split="train"):
+    def __init__(self, dataset_dir, splits_path, split="train", cache_models=False):
         self.split = split
         self.splits_path = (
             (Path(dataset_dir) / Path(splits_path)).expanduser().resolve()
@@ -341,7 +341,16 @@ class INRDataset(torch.utils.data.Dataset):
             Path(dataset_dir) / Path(p) for p in self.dataset["path"]
         ]
 
-        self.all_data = [None for _ in range(len(self.dataset["label"]))]
+        # Keeping tens of thousands of reconstructed INR nn.Modules resident in
+        # RAM is extremely expensive and, with DataLoader workers, also creates
+        # a large number of shared-memory mappings. The canonical behavior is
+        # therefore lazy/no-cache. Small debugging jobs may opt in explicitly.
+        self.cache_models = bool(cache_models)
+        self.all_data = (
+            [None for _ in range(len(self.dataset["label"]))]
+            if self.cache_models
+            else None
+        )
 
     def __len__(self):
         return len(self.dataset["label"])
@@ -350,23 +359,27 @@ class INRDataset(torch.utils.data.Dataset):
         return len(set(self.dataset["label"]))
 
     def __getitem__(self, item):
-        if self.all_data[item] is None:
-            path = str(self.dataset["path"][item])
-            try:
-                state_dict = torch.load(path, map_location='cpu')
-            except Exception as e:
-                print(f"Failed to load {path}")
-                raise e
-            if "label" in state_dict.keys():
-                state_dict.pop("label")
-            assert "label" not in state_dict.keys()
-            label = int(self.dataset["label"][item])
-            model = INR_Network(**infer_inr_arch(state_dict))
-            model.load_state_dict(state_dict)
-            self.all_data[item] = (model, label)
+        if self.cache_models and self.all_data[item] is not None:
+            return self.all_data[item]
 
-        model, label = self.all_data[item]
-        return model, label
+        path = str(self.dataset["path"][item])
+        try:
+            state_dict = torch.load(path, map_location="cpu")
+        except Exception as e:
+            print(f"Failed to load {path}")
+            raise e
+
+        if "label" in state_dict:
+            state_dict.pop("label")
+        label = int(self.dataset["label"][item])
+        model = INR_Network(**infer_inr_arch(state_dict))
+        model.load_state_dict(state_dict)
+        sample = (model, label)
+
+        if self.cache_models:
+            self.all_data[item] = sample
+
+        return sample
 
 class Generic_CNN_Network(nn.Module):
     def __init__(self, n_layers, channels, kernel_sizes, strides, activations, paddings, out_size=10):
