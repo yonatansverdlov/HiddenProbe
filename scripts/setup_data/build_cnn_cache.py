@@ -9,7 +9,7 @@ Usage:
     python scripts/setup_data/build_cnn_cache.py --cache_dir data/regression/cifar10_wp/wp_cnn_cache
     python scripts/setup_data/build_cnn_cache.py --splits val --cache_dir <dir>    # one split
   The zip is taken from $PGH_WP_ZIP (default data/regression/cifar10_wp/cnn_wild_park.zip) and the split
-  definition from $PGH_SPLITS (default scripts/setup_data/splits/cnn_park_splits.json); see data.py.
+  definition from $PGH_SPLITS (default data/regression/cifar10_wp/splits.json); see data.py.
 """
 import os, io, sys, time, json, zipfile, argparse, torch
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # portable repo root

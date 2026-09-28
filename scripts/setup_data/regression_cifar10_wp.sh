@@ -10,10 +10,10 @@ NAME="CIFAR10-WP"
 TARGET="$DATA_ROOT/regression/cifar10_wp"
 ARCHIVE="$TARGET/cnn_wild_park.zip"
 CACHE_DIR="${PGH_WP_CACHE:-$TARGET/wp_cnn_cache}"
-SPLIT_SRC="$SCRIPT_DIR/splits/cnn_park_splits.json"     # shipped with the repository
 SPLIT="$TARGET/splits.json"
 
 ARCHIVE_URL="https://zenodo.org/records/12797219/files/cnn_wild_park.zip?download=1"
+SPLIT_URL="https://raw.githubusercontent.com/jonkahana/ProbeGen/main/experiments/cnn_generalization/dataset/cnn_park_splits.json"
 
 log "============================================================"
 log "CIFAR10 Wild Park regression dataset setup"
@@ -33,9 +33,13 @@ cache_ready() {
     return 0
 }
 
-log "Step 1: installing the shipped canonical Wild-Park split definition."
-require_file "$SPLIT_SRC"
-cp -f "$SPLIT_SRC" "$SPLIT"
+log "Step 1: downloading the canonical Wild-Park split definition if needed."
+if [[ -s "$SPLIT" ]]; then
+    log "Canonical split already exists: $SPLIT"
+else
+    download_url "$SPLIT_URL" "$SPLIT"
+fi
+require_file "$SPLIT"
 
 log "Step 2: checking whether the CNN cache is already complete."
 if cache_ready; then

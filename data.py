@@ -425,8 +425,8 @@ def _r(env_name, *rel_parts, base=None):
 WP_DIR   = _r("PGH_WP_DIR", "regression", "cifar10_wp")                 # where regression_cifar10_wp.sh installs
 WP_ZIP   = _r("PGH_WP_ZIP", "cnn_wild_park.zip", base=WP_DIR)           # the Zenodo zip (read directly, never extracted)
 WP_CACHE = _r("PGH_WP_CACHE", "wp_cnn_cache", base=WP_DIR)              # flat-tensor CNN cache dir (build_cnn_cache.py)
-# split definition ships IN the repo; env can override
-SPLITS = os.environ.get("PGH_SPLITS") or os.path.join(REPO, "scripts", "setup_data", "splits", "cnn_park_splits.json")
+# Wild-Park setup downloads the canonical split into the data directory; env can override.
+SPLITS = os.environ.get("PGH_SPLITS") or os.path.join(WP_DIR, "splits.json")
 
 # Unterthiner SmallCNN grayscale zoos (weights.npy / metrics.csv.gz / layout.csv), as installed by scripts/setup_data
 ZOO_DIRS = {

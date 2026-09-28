@@ -26,19 +26,84 @@ require_cmd tar
 
 build_splits() {
     require_cmd python
-    log "Building the NFN split files (labels from the sub-directory name, split by net index)..."
-    if [[ -s "$SPLIT_AUG" ]]; then
-        log "Augmented split already exists: $SPLIT_AUG"
-    else
-        python "$SCRIPT_DIR/build_nfn_cifar_splits.py" --siren_dir "$TARGET" --out "$SPLIT_AUG"
-        log "Augmented split written: $SPLIT_AUG"
+
+    if [[ -s "$SPLIT_AUG" && -s "$SPLIT_NOAUG" ]]; then
+        log "Both NFN split files already exist."
+        return
     fi
-    if [[ -s "$SPLIT_NOAUG" ]]; then
-        log "Non-augmented split already exists: $SPLIT_NOAUG"
-    else
-        python "$SCRIPT_DIR/build_nfn_cifar_splits.py" --siren_dir "$TARGET" --out "$SPLIT_NOAUG" --no_aug
-        log "Non-augmented split written: $SPLIT_NOAUG"
-    fi
+
+    log "Building augmented and non-augmented NFN split files from the extracted SIREN zoo..."
+    python - "$TARGET" "$SPLIT_AUG" "$SPLIT_NOAUG" <<'PY'
+import glob
+import json
+import os
+import re
+import sys
+from collections import defaultdict
+
+siren_dir, aug_out, noaug_out = sys.argv[1:]
+prefix = "randinit_smaller"
+val_point = 45000
+test_point = 50000
+
+idx_re = re.compile(r"net(\d+)\.pth$")
+lbl_re = re.compile(r"_(\d+)s")
+
+files = glob.glob(os.path.join(siren_dir, f"{prefix}_*", "net*.pth"))
+print(f"[nfn-split] globbed {len(files)} .pth files")
+
+all_paths = defaultdict(list)
+base_paths = defaultdict(list)
+labels = {}
+
+for path in files:
+    dirname = os.path.basename(os.path.dirname(path))
+    idx_match = idx_re.search(os.path.basename(path))
+    label_match = lbl_re.search(dirname)
+    if not (idx_match and label_match):
+        continue
+
+    idx = int(idx_match.group(1))
+    label = int(label_match.group(1))
+    rel = os.path.relpath(path, siren_dir)
+
+    all_paths[idx].append(rel)
+    labels[idx] = label
+    if "aug" not in dirname:
+        base_paths[idx].append(rel)
+
+def split_for(idx):
+    if idx < val_point:
+        return "train"
+    if idx < test_point:
+        return "val"
+    return "test"
+
+def write_split(path_map, out_path, augmented):
+    out = {s: {"path": [], "label": []} for s in ("train", "val", "test")}
+
+    for idx in sorted(path_map):
+        split = split_for(idx)
+        copies = sorted(path_map[idx])
+        chosen = copies if (augmented and split == "train") else copies[:1]
+        for rel in chosen:
+            out[split]["path"].append(rel)
+            out[split]["label"].append(labels[idx])
+
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    with open(out_path, "w") as f:
+        json.dump(out, f)
+
+    print(f"[nfn-split] wrote {out_path}")
+    for split in ("train", "val", "test"):
+        print(f"  {split}: {len(out[split]['label'])}")
+
+if not os.path.isfile(aug_out) or os.path.getsize(aug_out) == 0:
+    write_split(all_paths, aug_out, augmented=True)
+
+if not os.path.isfile(noaug_out) or os.path.getsize(noaug_out) == 0:
+    write_split(base_paths, noaug_out, augmented=False)
+PY
 }
 
 log "Ensuring target directory exists..."
