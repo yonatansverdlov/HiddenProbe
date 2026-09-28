@@ -175,20 +175,6 @@ extract_tar_xz_with_progress() {
         | awk -v total="$total" -v label="$label" "$awk_program"
 }
 
-cleanup_stale_extract_dirs() {
-    local parent="$1"
-    local prefix="$2"
-
-    shopt -s nullglob
-    local dirs=("$parent"/"$prefix"*)
-    shopt -u nullglob
-
-    if (( ${#dirs[@]} > 0 )); then
-        log "Removing stale extraction directories."
-        rm -rf -- "${dirs[@]}"
-    fi
-}
-
 cleanup_archive() {
     local archive="$1"
 
