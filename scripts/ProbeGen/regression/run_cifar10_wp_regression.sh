@@ -20,7 +20,7 @@ fi
 # Install or verify the canonical dataset and split before training.
 bash scripts/setup_data/regression_cifar10_wp.sh
 
-EXP_NAME="probegen_cifar10_wp_Q128_5seeds_original"
+EXP_NAME="probegen_cifar10_wp_Q128_5seeds"
 python "$MAIN_PY" \
   --method probegen \
   --task regression \
@@ -40,7 +40,7 @@ python "$MAIN_PY" \
   --scheduler cosine \
   --plateau_monitor val_tau \
   --weight_decay 0.0 \
-  --epochs 30 \
+  --epochs 18 \
   --eval_every 500 \
-  --n_workers 4 \
+  --n_workers 0 \
   --device cuda
