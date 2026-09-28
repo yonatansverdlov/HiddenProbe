@@ -31,6 +31,7 @@ for ((SEED=0; SEED<NUM_SEEDS; SEED++)); do
 
   if [[ ! -s "$RUNS/last.pt" ]]; then
     python main.py transformer train \
+      --method hiddenprobe \
       --dataset mnist \
       --generator g3 \
       --n_classes 10 \
