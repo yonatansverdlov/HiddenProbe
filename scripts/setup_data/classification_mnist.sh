@@ -16,10 +16,11 @@ SPLIT_URL="https://raw.githubusercontent.com/jonkahana/ProbeGen/main/experiments
 extract_mnist_checkpoints_with_progress() {
     local archive="$1"
     local dest="$2"
-    local pattern='mnist-inrs/*/checkpoints/model_final.pth'
+    local train_pattern='mnist-inrs/mnist_png_training_*/checkpoints/model_final.pth'
+    local test_pattern='mnist-inrs/mnist_png_testing_*/checkpoints/model_final.pth'
 
     local total
-    total="$(unzip -Z1 "$archive" "$pattern" 2>/dev/null | wc -l | tr -d '[:space:]')"
+    total="$(unzip -Z1 "$archive" "$train_pattern" "$test_pattern" 2>/dev/null | wc -l | tr -d '[:space:]')"
     [[ -n "$total" && "$total" -gt 0 ]] || return 1
 
     log "MNIST INR checkpoints: $total files"
@@ -48,7 +49,7 @@ extract_mnist_checkpoints_with_progress() {
         }
     '
 
-    unzip -o "$archive" "$pattern" -d "$dest" 2>&1 \
+    unzip -o "$archive" "$train_pattern" "$test_pattern" -d "$dest" 2>&1 \
         | awk -v total="$total" "$awk_program"
 }
 
