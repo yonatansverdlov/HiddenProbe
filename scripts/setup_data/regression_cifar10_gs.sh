@@ -53,25 +53,20 @@ else
     download_url "$ARCHIVE_URL" "$ARCHIVE"
 fi
 
-log "Step 4: preparing a clean extraction workspace."
-PARENT="$(dirname "$TARGET")"
-TMP_PREFIX=".cifar10_gs_extract."
-cleanup_stale_extract_dirs "$PARENT" "$TMP_PREFIX"
-create_tmp() {
-    TMP="$(mktemp -d "$PARENT/${TMP_PREFIX}XXXXXX")"
-    log "Temporary extraction directory: $TMP"
-}
-create_tmp
-trap 'rm -rf "${TMP:-}"' EXIT
+log "Step 4: extracting CIFAR10-GS Small CNN Zoo directly into final target."
+rm -rf "$TARGET"
+mkdir -p "$TARGET"
 
-log "Step 5: extracting CIFAR10-GS Small CNN Zoo..."
-if ! extract_tar_xz_with_progress "$ARCHIVE" "$TMP" "cifar10_gs extraction"; then
+if ! extract_tar_xz_with_progress "$ARCHIVE" "$TARGET" "cifar10_gs extraction"; then
     log "Extraction failed; assuming the archive is corrupted or incomplete."
-    rm -rf "$TMP"; rm -f "$ARCHIVE" "${ARCHIVE}.part"
+    rm -rf "$TARGET"
+    rm -f "$ARCHIVE" "${ARCHIVE}.part"
     log "Downloading CIFAR10-GS Small CNN Zoo again from scratch..."
     download_url "$ARCHIVE_URL" "$ARCHIVE"
-    create_tmp
-    if ! extract_tar_xz_with_progress "$ARCHIVE" "$TMP" "cifar10_gs extraction retry"; then
+
+    mkdir -p "$TARGET"
+    if ! extract_tar_xz_with_progress "$ARCHIVE" "$TARGET" "cifar10_gs extraction retry"; then
+        rm -rf "$TARGET"
         rm -f "$ARCHIVE" "${ARCHIVE}.part"
         die "CIFAR10-GS extraction failed twice."
     fi
@@ -79,18 +74,19 @@ fi
 log "Extraction complete."
 
 log "Step 6: locating extracted dataset files."
-WEIGHTS="$(find "$TMP" -type f -name weights.npy -print -quit)"
+WEIGHTS="$(find "$TARGET" -type f -name weights.npy -print -quit)"
 [[ -n "$WEIGHTS" ]] || die "Extraction completed, but weights.npy was not found."
 SRC="$(dirname "$WEIGHTS")"
 require_file "$SRC/weights.npy"
 require_file "$SRC/metrics.csv.gz"
 require_file "$SRC/layout.csv"
 
-log "Step 7: installing extracted files into $TARGET."
-rm -f "$TARGET/weights.npy" "$TARGET/metrics.csv.gz" "$TARGET/layout.csv"
-mv "$SRC/weights.npy" "$TARGET/weights.npy"
-mv "$SRC/metrics.csv.gz" "$TARGET/metrics.csv.gz"
-mv "$SRC/layout.csv" "$TARGET/layout.csv"
+log "Step 7: normalizing extracted files in $TARGET."
+if [[ "$SRC" != "$TARGET" ]]; then
+    mv "$SRC/weights.npy" "$TARGET/weights.npy"
+    mv "$SRC/metrics.csv.gz" "$TARGET/metrics.csv.gz"
+    mv "$SRC/layout.csv" "$TARGET/layout.csv"
+fi
 
 log "Step 8: installing the official NFN split."
 install_split
