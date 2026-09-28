@@ -78,45 +78,28 @@ else
     download_url "$ARCHIVE_URL" "$ARCHIVE"
 fi
 
-PARENT="$DATA_ROOT/classification"
-TMP_PREFIX=".mnist_inr_extract."
-mkdir -p "$PARENT"
-cleanup_stale_extract_dirs "$PARENT" "$TMP_PREFIX"
+log "Extracting MNIST INR checkpoints directly into final data directory."
+rm -rf "$DATASET_DIR"
+mkdir -p "$DATASET_DIR"
 
-create_tmp() {
-    TMP="$(mktemp -d "$PARENT/${TMP_PREFIX}XXXXXX")"
-    log "Temporary extraction directory: $TMP"
-}
-
-create_tmp
-trap 'rm -rf "${TMP:-}"' EXIT
-
-log "Extracting MNIST INR checkpoints only."
-if ! extract_mnist_checkpoints_with_progress "$ARCHIVE" "$TMP"; then
+if ! extract_mnist_checkpoints_with_progress "$ARCHIVE" "$DATASET_DIR"; then
     log "Extraction failed; treating the archive as corrupt/incomplete."
-    rm -rf "$TMP"
+    rm -rf "$DATASET_DIR"
     rm -f "$ARCHIVE" "${ARCHIVE}.part"
 
     log "Re-downloading archive from scratch."
     download_url "$ARCHIVE_URL" "$ARCHIVE"
 
-    create_tmp
-    if ! extract_mnist_checkpoints_with_progress "$ARCHIVE" "$TMP"; then
+    mkdir -p "$DATASET_DIR"
+    if ! extract_mnist_checkpoints_with_progress "$ARCHIVE" "$DATASET_DIR"; then
+        rm -rf "$DATASET_DIR"
         rm -f "$ARCHIVE" "${ARCHIVE}.part"
         die "MNIST INR extraction failed twice."
     fi
 fi
 
-MNIST_ROOT="$(find "$TMP" -type d -name 'mnist-inrs' -print -quit)"
-[[ -n "$MNIST_ROOT" ]] || die "Archive does not contain the expected mnist-inrs directory."
-
-log "Installing only mnist-inrs into canonical data directory."
-rm -rf "$DATASET_DIR"
-mkdir -p "$DATASET_DIR"
-mv "$MNIST_ROOT" "$DATASET_DIR/"
-
 [[ -d "$DATASET_DIR/mnist-inrs" ]] \
-    || die "Installed MNIST INR tree is missing mnist-inrs."
+    || die "Archive does not contain the expected mnist-inrs directory."
 
 if [[ -s "$SPLIT" ]]; then
     log "Split JSON already exists."
