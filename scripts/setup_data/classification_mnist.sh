@@ -51,8 +51,8 @@ create_tmp() {
 create_tmp
 trap 'rm -rf "${TMP:-}"' EXIT
 
-log "Extracting MNIST INR archive."
-if ! extract_zip_with_progress "$ARCHIVE" "$TMP" "MNIST INR extraction"; then
+log "Extracting MNIST INR checkpoints only."
+if ! unzip -q "$ARCHIVE" 'mnist-inrs/*/checkpoints/model_final.pth' -d "$TMP"; then
     log "Extraction failed; treating the archive as corrupt/incomplete."
     rm -rf "$TMP"
     rm -f "$ARCHIVE" "${ARCHIVE}.part"
@@ -61,7 +61,7 @@ if ! extract_zip_with_progress "$ARCHIVE" "$TMP" "MNIST INR extraction"; then
     download_url "$ARCHIVE_URL" "$ARCHIVE"
 
     create_tmp
-    if ! extract_zip_with_progress "$ARCHIVE" "$TMP" "MNIST INR extraction"; then
+    if ! unzip -q "$ARCHIVE" 'mnist-inrs/*/checkpoints/model_final.pth' -d "$TMP"; then
         rm -f "$ARCHIVE" "${ARCHIVE}.part"
         die "MNIST INR extraction failed twice."
     fi
@@ -73,7 +73,7 @@ MNIST_ROOT="$(find "$TMP" -type d -name 'mnist-inrs' -print -quit)"
 log "Installing only mnist-inrs into canonical data directory."
 rm -rf "$DATASET_DIR"
 mkdir -p "$DATASET_DIR"
-cp -a "$MNIST_ROOT" "$DATASET_DIR/"
+mv "$MNIST_ROOT" "$DATASET_DIR/"
 
 [[ -d "$DATASET_DIR/mnist-inrs" ]] \
     || die "Installed MNIST INR tree is missing mnist-inrs."
