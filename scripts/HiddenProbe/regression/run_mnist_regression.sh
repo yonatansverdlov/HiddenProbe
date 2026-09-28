@@ -37,7 +37,26 @@ for ((SEED=0; SEED<NUM_SEEDS; SEED++)); do
   SUMMARIES+=("$SEED_OUT_DIR/summary.json")
 done
 
-python "$SCRIPT_DIR/aggregate_results.py" \
-  --dataset "MNIST" \
-  --model "HiddenProbe" \
-  "${SUMMARIES[@]}"
+python - "MNIST" "${SUMMARIES[@]}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+from models.logging_utils import print_final_summary
+
+dataset = sys.argv[1]
+values = []
+for item in sys.argv[2:]:
+    with Path(item).open() as f:
+        summary = json.load(f)
+    if "final_test_tau" not in summary:
+        raise RuntimeError(f"{item} does not contain final_test_tau")
+    values.append(float(summary["final_test_tau"]))
+
+print_final_summary(
+    method="HiddenProbe",
+    task="regression",
+    dataset=dataset,
+    values=values,
+)
+PY

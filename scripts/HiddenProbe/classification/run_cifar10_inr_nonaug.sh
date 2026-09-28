@@ -16,10 +16,37 @@ for ((SEED=0; SEED<NUM_SEEDS; SEED++)); do
   EXP_NAME="hiddenprobe_cifar10_inr_nonaug_Q${Q}_s${SEED}"
   SUMMARY="$RUNS_DIR/$EXP_NAME/summary.json"
 
-  python "$SCRIPT_DIR/recover_cifar_summary.py" \
-    --run_dir "$RUNS_DIR/$EXP_NAME" \
-    --exp_name "$EXP_NAME" \
-    --seed "$SEED"
+  python - "$RUNS_DIR/$EXP_NAME" "$EXP_NAME" "$SEED" <<'PY'
+import csv
+import json
+import sys
+from pathlib import Path
+
+run_dir = Path(sys.argv[1])
+exp_name = sys.argv[2]
+seed = int(sys.argv[3])
+summary = run_dir / "summary.json"
+log = run_dir / "log.csv"
+best = run_dir / "best.pt"
+
+if not summary.exists() and log.exists() and best.exists():
+    with log.open(newline="") as f:
+        rows = list(csv.DictReader(f))
+    final_rows = [r for r in rows if r.get("exp_name") == "FINAL"]
+    if final_rows:
+        row = final_rows[-1]
+        val = float(row["val_acc"])
+        test = float(row["test_acc"])
+        summary.write_text(json.dumps({
+            "exp": exp_name,
+            "seed": seed,
+            "best_val_acc": val,
+            "best_test_acc": test,
+            "final_val_acc": val,
+            "recovered_from_log": True,
+        }, indent=2) + "\n")
+        print(f"[recover] restored {summary} from completed log.csv")
+PY
 
   if [[ ! -s "$SUMMARY" ]]; then
     python main.py \
@@ -40,7 +67,23 @@ for ((SEED=0; SEED<NUM_SEEDS; SEED++)); do
   SUMMARIES+=("$SUMMARY")
 done
 
-python "$SCRIPT_DIR/aggregate_results.py" \
-  --dataset "CIFAR-10" \
-  --model "HiddenProbe" \
-  "${SUMMARIES[@]}"
+python - "CIFAR-10" "${SUMMARIES[@]}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+from models.logging_utils import print_final_summary
+
+dataset = sys.argv[1]
+values = []
+for item in sys.argv[2:]:
+    with Path(item).open() as f:
+        values.append(float(json.load(f)["best_test_acc"]))
+
+print_final_summary(
+    method="HiddenProbe",
+    task="classification",
+    dataset=dataset,
+    values=values,
+)
+PY
