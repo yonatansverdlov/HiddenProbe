@@ -53,6 +53,15 @@ dataset_files_ready() {
     return 0
 }
 
+download_gdrive() {
+    local file_id="$1"
+    local dest="$2"
+    local url="https://drive.usercontent.google.com/download?id=${file_id}&export=download&confirm=t"
+
+    log "Downloading Google Drive file id=${file_id}"
+    download_url "$url" "$dest"
+}
+
 download_url() {
     local url="$1"
     local dest="$2"
