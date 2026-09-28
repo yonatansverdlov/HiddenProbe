@@ -74,57 +74,28 @@ else
     log "SVHN archive download complete."
 fi
 
-log "Step 4: preparing a clean extraction workspace."
-PARENT="$(dirname "$TARGET")"
-TMP_PREFIX=".svhn_extract."
-cleanup_stale_extract_dirs "$PARENT" "$TMP_PREFIX"
+log "Step 4: extracting SVHN Small CNN Zoo directly into final target."
+rm -rf "$TARGET"
+mkdir -p "$TARGET"
 
-create_tmp() {
-    log "Creating temporary extraction directory..."
-    TMP="$(mktemp -d "$PARENT/${TMP_PREFIX}XXXXXX")"
-    log "Temporary extraction directory: $TMP"
-}
-
-create_tmp
-trap 'rm -rf "${TMP:-}"' EXIT
-
-log "Step 5: Extracting SVHN Small CNN Zoo..."
-log "Extraction may take some time."
-
-if extract_tar_xz_with_progress "$ARCHIVE" "$TMP" "SVHN extraction"; then
-    log "Extraction complete."
-else
-    log "Extraction failed."
-    log "Assuming the existing archive is corrupted or incomplete."
-
-    log "Removing failed extraction directory..."
-    rm -rf "$TMP"
-    log "Failed extraction directory removed."
-
-    log "Deleting bad archive..."
+if ! extract_tar_xz_with_progress "$ARCHIVE" "$TARGET" "SVHN extraction"; then
+    log "Extraction failed; assuming the archive is corrupted or incomplete."
+    rm -rf "$TARGET"
     rm -f "$ARCHIVE" "${ARCHIVE}.part"
-    log "Bad archive deleted."
-
     log "Downloading SVHN Small CNN Zoo again from scratch..."
     download_url "$ARCHIVE_URL" "$ARCHIVE"
-    log "SVHN archive re-download complete."
 
-    log "Preparing a fresh extraction directory..."
-    create_tmp
-
-    log "Retrying extraction..."
-    if ! extract_tar_xz_with_progress "$ARCHIVE" "$TMP" "SVHN extraction retry"; then
-        log "Second extraction attempt failed."
-        log "Deleting the newly downloaded archive because it cannot be extracted."
+    mkdir -p "$TARGET"
+    if ! extract_tar_xz_with_progress "$ARCHIVE" "$TARGET" "SVHN extraction retry"; then
+        rm -rf "$TARGET"
         rm -f "$ARCHIVE" "${ARCHIVE}.part"
         die "SVHN extraction failed twice."
     fi
-
-    log "Extraction complete on second attempt."
 fi
+log "Extraction complete."
 
 log "Step 6: locating extracted dataset files."
-WEIGHTS="$(find "$TMP" -type f -name weights.npy -print -quit)"
+WEIGHTS="$(find "$TARGET" -type f -name weights.npy -print -quit)"
 if [[ -z "$WEIGHTS" ]]; then
     die "Extraction completed, but weights.npy was not found."
 fi
@@ -139,24 +110,12 @@ require_file "$SRC/metrics.csv.gz"
 require_file "$SRC/layout.csv"
 log "All extracted model-zoo files passed sanity checks."
 
-log "Step 7: installing extracted SVHN files into final target."
-log "Removing any incomplete previous target files..."
-rm -f "$TARGET/weights.npy" "$TARGET/metrics.csv.gz" "$TARGET/layout.csv"
-log "Old incomplete target files removed."
-
-log "Moving weights.npy..."
-mv "$SRC/weights.npy" "$TARGET/weights.npy"
-log "weights.npy installed."
-
-log "Moving metrics.csv.gz..."
-mv "$SRC/metrics.csv.gz" "$TARGET/metrics.csv.gz"
-log "metrics.csv.gz installed."
-
-log "Moving layout.csv..."
-mv "$SRC/layout.csv" "$TARGET/layout.csv"
-log "layout.csv installed."
-
-log "Extracted SVHN model-zoo files installed successfully."
+log "Step 7: normalizing extracted SVHN files in final target."
+if [[ "$SRC" != "$TARGET" ]]; then
+    mv "$SRC/weights.npy" "$TARGET/weights.npy"
+    mv "$SRC/metrics.csv.gz" "$TARGET/metrics.csv.gz"
+    mv "$SRC/layout.csv" "$TARGET/layout.csv"
+fi
 
 log "Step 8: checking split.csv."
 if [[ -s "$SPLIT" ]]; then
