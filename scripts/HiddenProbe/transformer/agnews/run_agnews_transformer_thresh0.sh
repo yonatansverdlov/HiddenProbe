@@ -14,7 +14,7 @@ PRED_LR=5e-4
 GEN_LR=1e-3
 DROPOUT=0.1
 
-bash scripts/setup_data/regression_agnews_transformer.sh
+bash scripts/setup_data/transformer_agnews.sh
 
 # Transformer-NFN threshold protocol:
 # filter epoch-75 models by absolute accuracy first, then make a fresh
