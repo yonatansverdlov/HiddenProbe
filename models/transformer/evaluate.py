@@ -29,6 +29,31 @@ def _method_name(cfg):
     return "ProbeGen" if cfg.get("readout_arch") == "rout" else "HiddenProbe"
 
 
+def _run_signature(cfg):
+    """Fields that must agree across every seed in one reported result."""
+    return (
+        _method_name(cfg),
+        str(cfg.get("dataset")),
+        float(cfg.get("cut_off", 0.0)),
+        int(cfg.get("n_probes", -1)),
+        str(cfg.get("readout_arch")),
+        int(cfg.get("n_classes", -1)),
+    )
+
+
+def _assert_compatible_cfgs(cfgs, dirs):
+    if not cfgs:
+        return
+    expected = _run_signature(cfgs[0])
+    for cfg, d in zip(cfgs[1:], dirs[1:]):
+        got = _run_signature(cfg)
+        if got != expected:
+            raise RuntimeError(
+                "Refusing to aggregate incompatible Transformer runs. "
+                f"Expected {expected}, but {d} has {got}."
+            )
+
+
 pats = sys.argv[1:] if len(sys.argv) > 1 else ["checkpoints/tpf_*"]   # >1 pattern => cross-config ensemble
 pat = " + ".join(pats)
 dirs = sorted({d for p in pats for d in glob.glob(p) if os.path.isfile(os.path.join(d, "last.pt"))})
@@ -41,15 +66,18 @@ dev = "cuda" if torch.cuda.is_available() else "cpu"
 # normal summary path we can therefore avoid evaluating the test set a second time.
 if not os.environ.get("TP_SHOW_AUX") and not os.environ.get("TP_THRESH"):
     stored = []
-    stored_cfg = None
+    stored_cfgs = []
     for d in dirs:
         ck = torch.load(os.path.join(d, "last.pt"), map_location="cpu", weights_only=False)
         if "best_test_tau" not in ck:
             stored = []
+            stored_cfgs = []
             break
         stored.append(float(ck["best_test_tau"]))
-        stored_cfg = stored_cfg or ck["cfg"]
+        stored_cfgs.append(ck["cfg"])
     if stored and len(stored) == len(dirs):
+        _assert_compatible_cfgs(stored_cfgs, dirs)
+        stored_cfg = stored_cfgs[0]
         cut = float(stored_cfg.get("cut_off", 0.0))
         threshold_pct = int(round(cut * 100))
         dataset_label = f"{str(stored_cfg['dataset']).upper()} Transformer threshold {threshold_pct}%"
@@ -128,14 +156,16 @@ def tau(pred_by_id, true_by_id):
 
 
 import statistics
-acc, cfg0, trues0, seed_taus, seed_preds = {}, None, None, [], []
+acc, cfg0, trues0, seed_taus, seed_preds, eval_cfgs = {}, None, None, [], [], []
 for d in dirs:
     a, p, t = test_preds(d)
+    eval_cfgs.append(a)
     cfg0 = cfg0 or (a["dataset"], a["generator"], a["n_probes"], a["readout"], a["pred_lr"], a["gen_lr"], a["scheduler"])
     trues0 = trues0 or t
     st = tau(p, t); seed_taus.append(st); seed_preds.append(p)
     for i, v in p.items():
         acc.setdefault(i, []).append(v)
+_assert_compatible_cfgs(eval_cfgs, dirs)
 n = len(seed_taus)
 cut = float(a.get("cut_off", 0.0))
 mean = sum(seed_taus) / n
