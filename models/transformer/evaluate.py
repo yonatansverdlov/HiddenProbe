@@ -16,6 +16,19 @@ try:
 except Exception:
     kendalltau = None
 
+def _method_name(cfg):
+    method = str(cfg.get("method", "")).lower()
+    if method == "probegen":
+        return "ProbeGen"
+    if method == "hiddenprobe":
+        return "HiddenProbe"
+
+    # Backward compatibility for checkpoints created before --method was stored.
+    # rout is the output/logits-only ProbeGen-style baseline; hidden-response
+    # Transformer runs use the other readout architectures.
+    return "ProbeGen" if cfg.get("readout_arch") == "rout" else "HiddenProbe"
+
+
 pats = sys.argv[1:] if len(sys.argv) > 1 else ["checkpoints/tpf_*"]   # >1 pattern => cross-config ensemble
 pat = " + ".join(pats)
 dirs = sorted({d for p in pats for d in glob.glob(p) if os.path.isfile(os.path.join(d, "last.pt"))})
@@ -41,7 +54,7 @@ if not os.environ.get("TP_SHOW_AUX") and not os.environ.get("TP_THRESH"):
         threshold_pct = int(round(cut * 100))
         dataset_label = f"{str(stored_cfg['dataset']).upper()} Transformer threshold {threshold_pct}%"
         print_final_summary(
-            method="HiddenProbe", task="regression", dataset=dataset_label, values=stored
+            method=_method_name(stored_cfg), task="regression", dataset=dataset_label, values=stored
         )
         sys.exit(0)
 
@@ -132,7 +145,7 @@ et = tau(ens, trues0)
 threshold_pct = int(round(cut * 100))
 dataset_label = str(a["dataset"]).upper()
 print_final_summary(
-    method="HiddenProbe",
+    method=_method_name(a),
     task="regression",
     dataset=f"{dataset_label} Transformer threshold {threshold_pct}%",
     values=seed_taus,
