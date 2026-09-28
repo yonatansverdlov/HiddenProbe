@@ -116,7 +116,7 @@ def _load_params(system, shadow):
 
 
 # ---------------- reproducibility state (additive; all default-off so legacy runs are byte-identical) ----------------
-_COMPAT_KEYS = ("dataset", "generator", "n_classes", "n_probes", "readout", "readout_arch", "pma_seeds",
+_COMPAT_KEYS = ("method", "dataset", "generator", "n_classes", "n_probes", "readout", "readout_arch", "pma_seeds",
                 "stats_bypass", "token_mlp", "moments", "signed_mix",
                 "dropout", "n_slots", "seed")
 
@@ -411,6 +411,15 @@ def cmd_verify(a):
 
 
 def cmd_train(a):
+    if a.method == "probegen" and a.readout_arch != "rout":
+        raise SystemExit(
+            f"ProbeGen Transformer runs require --readout_arch rout, got {a.readout_arch!r}."
+        )
+    if a.method == "hiddenprobe" and a.readout_arch == "rout":
+        raise SystemExit(
+            "HiddenProbe Transformer runs cannot use output-only --readout_arch rout."
+        )
+
     cfg = _mkcfg(a)
     torch.manual_seed(a.seed)                          # vary model init per training seed (split stays FIXED below)
     sys_ = LearnedSystem(cfg)
@@ -452,7 +461,7 @@ def cmd_train(a):
     threshold_pct = int(round(float(a.cut_off) * 100))
     dataset_label = f"{a.dataset.upper()} Transformer threshold {threshold_pct}%"
     print_run_config(
-        method="HiddenProbe", task="regression", dataset=dataset_label,
+        method=("ProbeGen" if a.method == "probegen" else "HiddenProbe"), task="regression", dataset=dataset_label,
         seed=a.seed, experiment=os.path.basename(runs.rstrip(os.sep)),
         train_size=len(tr), val_size=len(va), test_size=len(te),
         probes=a.n_probes, parameters=sum(p.numel() for p in sys_.parameters()),
@@ -493,6 +502,8 @@ def main():
         s = sub.add_parser(name)
         s.add_argument("--dataset", choices=["mnist", "agnews"], required=True)
         s.add_argument("--seed", type=int, default=0)
+        if name == "train":
+            s.add_argument("--method", choices=["probegen", "hiddenprobe"], required=True)
         if name in ("count", "smoke", "train"):
             s.add_argument("--generator", choices=["g3", "glin"], required=True,
                            help="shared unconditioned probe generator: g3 (nonlinear) | glin (deep-linear)")
