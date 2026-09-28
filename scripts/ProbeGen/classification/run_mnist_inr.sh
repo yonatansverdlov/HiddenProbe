@@ -7,8 +7,6 @@ cd "$REPO_ROOT"
 
 bash scripts/setup_data/classification_mnist.sh
 
-MAIN_PY="${MAIN_PY:-main.py}"
-
 python main.py \
   --method probegen \
   --task classification \
