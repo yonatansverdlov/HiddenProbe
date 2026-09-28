@@ -10,8 +10,9 @@ bash scripts/setup_data/classification_mnist.sh
 python main.py \
   --method probegen \
   --task classification \
-  --exp_name=ProbeGen_128__seed_1 \
-  --seed=1 \
+  --exp_name=ProbeGen_128_5seeds \
+  --seed=0 \
+  --num_seeds=5 \
   --dataset=mnist \
   \
   --n_probes=128 \
