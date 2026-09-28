@@ -42,5 +42,5 @@ python "$MAIN_PY" \
   --weight_decay 0.0 \
   --epochs 150 \
   --eval_every 500 \
-  --n_workers 4 \
+  --n_workers 0 \
   --device cuda
