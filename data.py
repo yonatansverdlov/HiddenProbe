@@ -424,7 +424,7 @@ def _r(env_name, *rel_parts, base=None):
 
 WP_DIR   = _r("PGH_WP_DIR", "regression", "cifar10_wp")                 # where regression_cifar10_wp.sh installs
 WP_ZIP   = _r("PGH_WP_ZIP", "cnn_wild_park.zip", base=WP_DIR)           # the Zenodo zip (read directly, never extracted)
-WP_CACHE = _r("PGH_WP_CACHE", "wp_cnn_cache", base=WP_DIR)              # flat-tensor CNN cache dir (build_cnn_cache.py)
+WP_CACHE = _r("PGH_WP_CACHE", "wp_cnn_cache", base=WP_DIR)              # flat-tensor CNN cache dir built by the WP setup script
 # Wild-Park setup downloads the canonical split into the data directory; env can override.
 SPLITS = os.environ.get("PGH_SPLITS") or os.path.join(WP_DIR, "splits.json")
 
@@ -476,7 +476,7 @@ def _build_net(cfg, sd):
 
 
 def _load_cnns_from_cache(cache_file, limit, dev):
-    """Fast path: reconstruct CNNs from a flat-tensor cache (built by scripts/setup_data/build_cnn_cache.py).
+    """Fast path: reconstruct CNNs from the flat-tensor cache built by regression_cifar10_wp.sh.
     ~5-6x faster than the zip path (no per-CNN unzip/unpickle); produces bit-identical modules."""
     c = torch.load(cache_file, map_location="cpu", weights_only=False)
     flat, metas, scores = c["flat"], c["metas"], c["scores"]
@@ -498,7 +498,7 @@ def load_cnns(split, limit=0, dev="cpu", splits_path=DEFAULT_SPLITS, zip_path=No
         cf = os.path.join(cnn_cache, f"cnn_cache_{split}.pt")
         if os.path.exists(cf):
             return _load_cnns_from_cache(cf, limit, dev)
-        print(f"[wp] cnn_cache set but {cf} missing -> serial zip load (build it with build_cnn_cache.py)", flush=True)
+        print(f"[wp] cnn_cache set but {cf} missing -> serial zip load (run scripts/setup_data/regression_cifar10_wp.sh to build it)", flush=True)
     zp = zip_path or (DEFAULT_ZIP_SHM if os.path.exists(DEFAULT_ZIP_SHM) else DEFAULT_ZIP_NAS)
     zf = zipfile.ZipFile(zp)
     sp = json.load(open(splits_path))[split]
