@@ -11,7 +11,7 @@ MAIN_PY="${MAIN_PY:-main.py}"
 
 
 DATASET="fmnist"
-EXP_NAME="fmnist_reg_mlp2_out10_dhid351_FINAL_5SEEDS_60E_plateau_lr5e-4_pat3_fac0.2"
+EXP_NAME="fmnist_reg_mlp2_out10_dhid351_FINAL_5SEEDS_150E_plateau_lr5e-4_pat3_fac0.2"
 
 python "${MAIN_PY}" \
   --method probegen \
@@ -20,7 +20,7 @@ python "${MAIN_PY}" \
   --dataset="${DATASET}" \
   --seed=0 \
   --num_seeds=5 \
-  --epochs=60 \
+  --epochs=150 \
   --batch_size=64 \
   --n_probes=128 \
   --d_hid=351 \
