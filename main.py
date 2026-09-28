@@ -13,6 +13,7 @@ nfn_cifar_inr, *_gs and wp are intentionally hidden from the public interface.
 """
 from __future__ import annotations
 
+import os
 import runpy
 import sys
 from typing import List, Optional, Set
@@ -113,6 +114,18 @@ def _normalize_dataset(dataset: str) -> str:
     return _DATASET_ALIASES.get(dataset, dataset)
 
 
+def _available_cpu_workers() -> int:
+    """Number of CPU workers actually available to this process.
+
+    On Linux, sched_getaffinity respects Slurm/cgroup/cpuset restrictions, so this
+    matches the CPUs the current job can really use rather than the host total.
+    """
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        return max(1, os.cpu_count() or 1)
+
+
 def _run(module: str, argv: List[str]) -> None:
     sys.argv = [sys.argv[0]] + argv
     runpy.run_module(module, run_name="__main__", alter_sys=True)
@@ -120,11 +133,14 @@ def _run(module: str, argv: List[str]) -> None:
 
 def _route_core(method: str, task: str, dataset: str, argv: List[str]) -> None:
     # This backend owns ALL ProbeGen runs, plus HiddenProbe MNIST/FMNIST classification.
-    forwarded = _drop_flags(argv, {"method", "task", "dataset"})
+    # main.py owns DataLoader worker selection: use the CPUs actually available
+    # to this process and ignore stale/hard-coded --n_workers values in scripts.
+    forwarded = _drop_flags(argv, {"method", "task", "dataset", "n_workers"})
     forwarded = [
         "--method", method,
         "--task", task,
         "--dataset", dataset,
+        "--n_workers", str(_available_cpu_workers()),
     ] + forwarded
     _run("models.probegen_core_trainer", forwarded)
 
