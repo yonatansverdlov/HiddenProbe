@@ -5,8 +5,9 @@ Core rule:
     inr_classification_branch. This is true for BOTH classification and regression.
   * method=hiddenprobe uses that same backend only for MNIST/FMNIST classification.
   * all remaining HiddenProbe runs use the hiddenprobe branch implementations.
-  * transformer experiments remain on the hiddenprobe branch and keep their existing
-    "python main.py transformer ..." interface.
+  * transformer experiments share the transformer backend. Training requires an
+    explicit --method {probegen,hiddenprobe}, and the backend validates the matching
+    readout semantics.
 
 The routing layer owns method/task/dataset selection. Backend-only names such as
 nfn_cifar_inr, *_gs and wp are intentionally hidden from the public interface.
@@ -66,8 +67,9 @@ routing:
   HiddenProbe CIFAR class.        -> hiddenprobe INR backend
   HiddenProbe regression          -> hiddenprobe CNN-zoo/Wild-Park backend
 
-transformers (kept from hiddenprobe):
-  python main.py transformer {train,count,cache,smoke,manifest,verify} [args...]
+transformers:
+  python main.py transformer train --method {probegen,hiddenprobe} [args...]
+  python main.py transformer {count,cache,smoke,manifest,verify} [args...]
 """
 
 
@@ -203,7 +205,7 @@ def main() -> None:
     if not argv or argv[0] in {"-h", "--help"}:
         _usage()
 
-    # Transformer work is intentionally retained from the second branch unchanged.
+    # Transformer training uses a shared backend with an explicit method flag.
     if argv[0] == "transformer":
         _run("models.transformer.train", argv[1:])
         return
