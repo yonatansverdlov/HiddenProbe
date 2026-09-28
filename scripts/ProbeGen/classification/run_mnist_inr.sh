@@ -9,7 +9,7 @@ bash scripts/setup_data/classification_mnist.sh
 
 MAIN_PY="${MAIN_PY:-main.py}"
 
-python "$MAIN_PY" \
+python main.py \
   --method probegen \
   --task classification \
   --exp_name=ProbeGen_128__seed_1 \
