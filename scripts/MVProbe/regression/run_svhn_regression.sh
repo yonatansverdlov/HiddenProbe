@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Stage 1 (seed 0, validation only):
 #   3 convolution weight tensors x 2 n_probes x 2 proj_dim x 3 learning rates
-#   x 2 batch sizes x 3 weight decays = 216 configs.
+#   x 2 batch sizes x 3 weight decays x 4 plateau factors = 864 configs.
 #   60 epochs each by default; the held-out test split is never instantiated or evaluated.
 #   Scheduler: ReduceLROnPlateau on validation metric.
 #
@@ -67,6 +67,10 @@ for LAYER in 0 1 2; do
               --proj_dim "$PROJ_DIM" \
               --rep_dim "$REP_DIM" \
               --lr "$LR" \
+              --scheduler plateau \
+              --plateau_factor "$PLATEAU_FACTOR" \
+              --plateau_patience "$PLATEAU_PATIENCE" \
+              --plateau_min_lr "$PLATEAU_MIN_LR" \
               --weight_decay "$WEIGHT_DECAY" \
               --batch_size "$BATCH_SIZE" \
               --epochs "$SWEEP_EPOCHS" \
@@ -108,8 +112,8 @@ for path in root.glob("*/summary.json"):
         "params": int(s["params"]),
     })
 
-if len(rows) != 216:
-    raise RuntimeError(f"Expected 216 completed sweep configs, found {len(rows)}")
+if len(rows) != 864:
+    raise RuntimeError(f"Expected 864 completed sweep configs, found {len(rows)}")
 
 rows.sort(key=lambda r: r["best_val_tau"], reverse=True)
 fields = list(rows[0])
