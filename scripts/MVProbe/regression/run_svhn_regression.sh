@@ -54,7 +54,21 @@ for LAYER in 0 1 2 3; do
           echo "Completed: $NAME (skipping)"
           continue
         fi
-        "$PYTHON" models/mvprobe_svhn_trainer.py           --data_dir "$DATA_DIR"           --split_csv "$SPLIT"           --layer_index "$LAYER"           --n_probes "$N_PROBES"           --proj_dim "$PROJ_DIM"           --rep_dim "$REP_DIM"           --lr "$LR"           --weight_decay "$WEIGHT_DECAY"           --batch_size "$BATCH_SIZE"           --epochs "$SWEEP_EPOCHS"           --seed 0           --device "$DEVICE"           --skip_test_eval           --out_dir "$DIR"
+        "$PYTHON" models/mvprobe_svhn_trainer.py \
+          --data_dir "$DATA_DIR" \
+          --split_csv "$SPLIT" \
+          --layer_index "$LAYER" \
+          --n_probes "$N_PROBES" \
+          --proj_dim "$PROJ_DIM" \
+          --rep_dim "$REP_DIM" \
+          --lr "$LR" \
+          --weight_decay "$WEIGHT_DECAY" \
+          --batch_size "$BATCH_SIZE" \
+          --epochs "$SWEEP_EPOCHS" \
+          --seed 0 \
+          --device "$DEVICE" \
+          --skip_test_eval \
+          --out_dir "$DIR"
       done
     done
   done
@@ -123,7 +137,20 @@ for SEED in 0 1 2 3 4; do
     echo "Completed final seed $SEED (skipping)"
     continue
   fi
-  "$PYTHON" models/mvprobe_svhn_trainer.py     --data_dir "$DATA_DIR"     --split_csv "$SPLIT"     --layer_index "$BEST_LAYER"     --n_probes "$BEST_Q"     --proj_dim "$BEST_PROJ"     --rep_dim "$BEST_REP"     --lr "$BEST_LR"     --weight_decay "$WEIGHT_DECAY"     --batch_size "$BATCH_SIZE"     --epochs "$FINAL_EPOCHS"     --seed "$SEED"     --device "$DEVICE"     --out_dir "$DIR"
+  "$PYTHON" models/mvprobe_svhn_trainer.py \
+    --data_dir "$DATA_DIR" \
+    --split_csv "$SPLIT" \
+    --layer_index "$BEST_LAYER" \
+    --n_probes "$BEST_Q" \
+    --proj_dim "$BEST_PROJ" \
+    --rep_dim "$BEST_REP" \
+    --lr "$BEST_LR" \
+    --weight_decay "$WEIGHT_DECAY" \
+    --batch_size "$BATCH_SIZE" \
+    --epochs "$FINAL_EPOCHS" \
+    --seed "$SEED" \
+    --device "$DEVICE" \
+    --out_dir "$DIR"
 done
 
 "$PYTHON" - "$SWEEP_ROOT/selected_config.json" "${SUMMARIES[@]}" <<'PY'
