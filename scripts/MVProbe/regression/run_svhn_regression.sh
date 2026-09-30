@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Stage 1 (seed 0, validation only):
 #   4 weight tensors x 2 n_probes x 2 proj_dim x 2 learning rates = 32 configs
-#   30 epochs each; TEST IS NEVER LOADED.
+#   30 epochs each; the held-out test split is never instantiated or evaluated.
 #
 # Stage 2:
 #   select highest best_val_tau, then run that exact configuration on seeds 0..4.
