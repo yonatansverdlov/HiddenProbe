@@ -24,8 +24,8 @@ FINAL_EPOCHS="${FINAL_EPOCHS:-150}"
 [[ -d "$DATA_DIR" ]] || { echo "Missing $DATA_DIR" >&2; exit 2; }
 [[ -s "$SPLIT" ]] || { echo "Missing $SPLIT" >&2; exit 2; }
 
-SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_cifar100_inr_sweep_plateau_s0"
-FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_cifar100_inr_best_plateau"
+SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_cifar100_inr_sweep_plateau_factor_s0"
+FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_cifar100_inr_best_plateau_factor"
 mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
 RUN=0
