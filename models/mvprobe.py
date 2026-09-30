@@ -147,3 +147,31 @@ class ProbeXRegression(ProbeXCore):
     def forward(self, x):
         _, representation = self.encode(x)
         return self.regression_head(representation).squeeze(-1)
+
+
+class ProbeXClassification(ProbeXCore):
+    """Official MVProbe encoder + linear classification head."""
+
+    def __init__(
+        self,
+        input_shape,
+        n_probes: int,
+        proj_dim: int,
+        rep_dim: int,
+        n_classes: int,
+        x_center: bool = False,
+        x_row_norm: bool = False,
+    ):
+        super().__init__(
+            input_shape=input_shape,
+            n_probes=n_probes,
+            proj_dim=proj_dim,
+            rep_dim=rep_dim,
+            x_center=x_center,
+            x_row_norm=x_row_norm,
+        )
+        self.classification_head = nn.Linear(self.rep_dim_out, int(n_classes))
+
+    def forward(self, x):
+        _, representation = self.encode(x)
+        return self.classification_head(representation)
