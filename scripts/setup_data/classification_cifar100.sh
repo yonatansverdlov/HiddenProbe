@@ -127,7 +127,7 @@ fi
 rm -rf "$STAGING"
 mkdir -p "$STAGING"
 log "Downloading the official CIFAR100 SIREN folder from the paper's Google Drive..."
-"${GDOWN[@]}" --folder --remaining-ok "$GDRIVE_FOLDER_URL" -O "$STAGING"
+"${GDOWN[@]}" --folder "$GDRIVE_FOLDER_URL" -O "$STAGING"
 
 SRC="$(find_zoo_root "$STAGING" || true)"
 if [[ -z "$SRC" ]]; then
