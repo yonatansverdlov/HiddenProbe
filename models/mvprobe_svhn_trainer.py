@@ -66,7 +66,17 @@ class SVHNWeightLayerDataset(Dataset):
         self.end = int(row["end_idx"])
         self.shape = tuple(ast.literal_eval(str(row["shape"])))
 
-        split_info = make_split(data_dir=data_dir, split_csv=split_csv)[split]
+        split_path = Path(split_csv).expanduser()
+        if split_path.is_absolute():
+            split_arg = str(split_path)
+        elif split_path.exists():
+            # A repo-root relative path such as data/regression/svhn/split.csv.
+            split_arg = str(split_path.resolve())
+        else:
+            # A filename such as split.csv; let make_split resolve it under data_dir.
+            split_arg = split_csv
+
+        split_info = make_split(data_dir=data_dir, split_csv=split_arg)[split]
         self.rows = np.asarray(split_info["rows"], dtype=np.int64)
         self.targets = np.asarray(split_info["scores"], dtype=np.float32)
 
