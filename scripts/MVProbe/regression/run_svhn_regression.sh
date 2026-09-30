@@ -38,8 +38,8 @@ DEVICE="${DEVICE:-cuda}"
 PLATEAU_PATIENCE="${PLATEAU_PATIENCE:-5}"
 PLATEAU_MIN_LR="${PLATEAU_MIN_LR:-1e-6}"
 
-SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_sweep_conv_plateau_s0"
-FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_best_conv_plateau"
+SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_sweep_conv_plateau_factor_s0"
+FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_best_conv_plateau_factor"
 mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
 RUN=0
