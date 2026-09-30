@@ -93,22 +93,64 @@ class INRWeightLayerDataset(Dataset):
             )
         self.matrix_shape = tuple(sample.shape)
 
+        # Each sweep launches many short processes. Re-reading tens of thousands
+        # of tiny INR checkpoints for every configuration would dominate runtime,
+        # so materialize the selected matrix once per layer and split.
+        cache_root = self.data_dir / ".mvprobe_cache" / split_path.stem
+        cache_root.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_root / f"layer{self.layer_index}_{split}.pt"
+        if cache_file.exists():
+            cached = torch.load(cache_file, map_location="cpu", weights_only=False)
+            if (
+                cached.get("layer_name") == self.layer_name
+                and tuple(cached.get("matrix_shape", ())) == self.matrix_shape
+                and len(cached["labels"]) == len(self.labels)
+            ):
+                self.matrices = cached["matrices"].float()
+                self.labels = cached["labels"].numpy().astype(np.int64, copy=False)
+                return
+
+        matrices = []
+        for i, path in enumerate(self.paths):
+            sd = torch.load(path, map_location="cpu", weights_only=False)
+            if "label" in sd:
+                sd = dict(sd)
+                sd.pop("label")
+            sd = _remap_siren_keys(sd)
+            x = sd[self.layer_name].detach().float()
+            if tuple(x.shape) != self.matrix_shape:
+                raise RuntimeError(
+                    f"Inconsistent shape for {path}:{self.layer_name}; "
+                    f"expected {self.matrix_shape}, got {tuple(x.shape)}"
+                )
+            matrices.append(x)
+            if (i + 1) % 5000 == 0:
+                print(
+                    f"[mvprobe-cache] {split} layer {self.layer_index}: "
+                    f"{i + 1:,}/{len(self.paths):,}",
+                    flush=True,
+                )
+
+        self.matrices = torch.stack(matrices, dim=0)
+        label_tensor = torch.from_numpy(self.labels.copy()).long()
+        tmp = cache_file.with_suffix(".tmp")
+        torch.save(
+            {
+                "layer_name": self.layer_name,
+                "matrix_shape": self.matrix_shape,
+                "matrices": self.matrices,
+                "labels": label_tensor,
+            },
+            tmp,
+        )
+        os.replace(tmp, cache_file)
+        print(f"[mvprobe-cache] wrote {cache_file}", flush=True)
+
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        sd = torch.load(self.paths[idx], map_location="cpu", weights_only=False)
-        if "label" in sd:
-            sd = dict(sd)
-            sd.pop("label")
-        sd = _remap_siren_keys(sd)
-        x = sd[self.layer_name].detach().float()
-        if tuple(x.shape) != self.matrix_shape:
-            raise RuntimeError(
-                f"Inconsistent shape for {self.paths[idx]}:{self.layer_name}; "
-                f"expected {self.matrix_shape}, got {tuple(x.shape)}"
-            )
-        return x, torch.tensor(int(self.labels[idx]), dtype=torch.long)
+        return self.matrices[idx], torch.tensor(int(self.labels[idx]), dtype=torch.long)
 
 
 @torch.no_grad()
