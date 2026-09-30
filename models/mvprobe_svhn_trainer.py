@@ -151,6 +151,10 @@ def main():
     ap.add_argument("--proj_dim", type=int, default=128)
     ap.add_argument("--rep_dim", type=int, default=512)
     ap.add_argument("--lr", type=float, default=3e-4)
+    ap.add_argument("--scheduler", choices=["none", "plateau"], default="none")
+    ap.add_argument("--plateau_factor", type=float, default=0.5)
+    ap.add_argument("--plateau_patience", type=int, default=5)
+    ap.add_argument("--plateau_min_lr", type=float, default=1e-6)
     ap.add_argument("--weight_decay", type=float, default=1e-5)
     ap.add_argument("--batch_size", type=int, default=128)
     ap.add_argument("--epochs", type=int, default=30)
@@ -194,6 +198,15 @@ def main():
     optimizer = torch.optim.Adam(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
+    scheduler = None
+    if args.scheduler == "plateau":
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="max",
+            factor=args.plateau_factor,
+            patience=args.plateau_patience,
+            min_lr=args.plateau_min_lr,
+        )
 
     total_params = sum(p.numel() for p in model.parameters())
     print_run_config(
@@ -238,6 +251,8 @@ def main():
             train_count += y.numel()
 
         val = evaluate(model, val_loader, device)
+        if scheduler is not None:
+            scheduler.step(val["tau"])
         is_best = val["tau"] > best_val_tau
         if is_best:
             best_val_tau = val["tau"]
@@ -275,6 +290,10 @@ def main():
         "lr": args.lr,
         "weight_decay": args.weight_decay,
         "batch_size": args.batch_size,
+        "scheduler": args.scheduler,
+        "plateau_factor": args.plateau_factor,
+        "plateau_patience": args.plateau_patience,
+        "plateau_min_lr": args.plateau_min_lr,
         "epochs": args.epochs,
         "params": total_params,
         "best_val_tau": best_val_tau,
