@@ -262,7 +262,9 @@ def main():
     print(
         f"Layer: {args.layer_index} {train_ds.layer_name} -> X{train_ds.matrix_shape}; "
         f"proj_dim={args.proj_dim} rep_dim={args.rep_dim} lr={args.lr:g} "
-        f"bs={args.batch_size} wd={args.weight_decay:g}",
+        f"bs={args.batch_size} wd={args.weight_decay:g} scheduler={args.scheduler} "
+        f"factor={args.plateau_factor:g} patience={args.plateau_patience} "
+        f"min_lr={args.plateau_min_lr:g}",
         flush=True,
     )
 
