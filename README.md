@@ -192,6 +192,24 @@ Run each threshold separately (0%, 20%, 40%, 60%, 80%). Each threshold script tr
 ./scripts/ProbeGen/transformer/agnews/run_agnews_transformer_thresh80.sh
 ```
 
+## MVProbe baseline
+
+The repository also contains an SVHN accuracy-regression adaptation of the official
+[MVProbe](https://github.com/AI-hew-math/MVProbe) four-view weight encoder
+("What Linear Probes Miss: Multi-View Probing for Weight-Space Learning", ICML 2026).
+It reuses the same SVHN Small-CNN Zoo and official NFN split as HiddenProbe/ProbeGen.
+
+The runner first selects a weight layer and hyperparameters using validation Kendall tau
+only (32 seed-0 configurations, 30 epochs by default; test is not loaded), then evaluates
+the selected configuration on five seeds:
+
+```bash
+./scripts/MVProbe/regression/run_svhn_regression.sh
+```
+
+The copied/adapted MVProbe encoder remains under its original MIT license; see
+`LICENSES/MVProbe_LICENSE`.
+
 ## Repository structure
 
 ```text
@@ -199,6 +217,7 @@ main.py                         Main experiment entry point
 models/                         HiddenProbe models and trainers
 scripts/HiddenProbe/            HiddenProbe experiment runners (classification, regression, transformer)
 scripts/ProbeGen/               ProbeGen experiment runners (classification, regression, transformer)
+scripts/MVProbe/                MVProbe weight-space baseline runners
 scripts/setup_data/             Automatic dataset download and preparation
 ```
 
