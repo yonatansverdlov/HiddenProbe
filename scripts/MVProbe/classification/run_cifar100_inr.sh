@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # MVProbe CIFAR100 INR classification.
-# Released four-view implementation, constant LR (no scheduler).
+# Released four-view implementation with ReduceLROnPlateau for our sweep protocol.
 # Sweep: hidden weights only; final output/RGB layer is excluded.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,6 +15,9 @@ DATA_DIR="${CIFAR100_INR_DIR:-$REPO_ROOT/data/classification/cifar100_inr}"
 SPLIT="${CIFAR100_INR_SPLIT:-$DATA_DIR/dng_cifar100_split_noaug.json}"
 PYTHON="${PYTHON:-python}"
 DEVICE="${DEVICE:-cuda}"
+PLATEAU_FACTOR="${PLATEAU_FACTOR:-0.5}"
+PLATEAU_PATIENCE="${PLATEAU_PATIENCE:-5}"
+PLATEAU_MIN_LR="${PLATEAU_MIN_LR:-1e-6}"
 REP_DIM="${REP_DIM:-512}"
 SWEEP_EPOCHS="${SWEEP_EPOCHS:-60}"
 FINAL_EPOCHS="${FINAL_EPOCHS:-150}"
@@ -22,8 +25,8 @@ FINAL_EPOCHS="${FINAL_EPOCHS:-150}"
 [[ -d "$DATA_DIR" ]] || { echo "Missing $DATA_DIR" >&2; exit 2; }
 [[ -s "$SPLIT" ]] || { echo "Missing $SPLIT" >&2; exit 2; }
 
-SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_cifar100_inr_sweep_s0"
-FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_cifar100_inr_best"
+SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_cifar100_inr_sweep_plateau_s0"
+FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_cifar100_inr_best_plateau"
 mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
 RUN=0
@@ -145,6 +148,10 @@ for SEED in 0 1 2 3 4; do
     --proj_dim "$BEST_PROJ" \
     --rep_dim "$BEST_REP" \
     --lr "$BEST_LR" \
+    --scheduler plateau \
+    --plateau_factor "$PLATEAU_FACTOR" \
+    --plateau_patience "$PLATEAU_PATIENCE" \
+    --plateau_min_lr "$PLATEAU_MIN_LR" \
     --weight_decay "$BEST_WD" \
     --batch_size "$BEST_BS" \
     --epochs "$FINAL_EPOCHS" \
