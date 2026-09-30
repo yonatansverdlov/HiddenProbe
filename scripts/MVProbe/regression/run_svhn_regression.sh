@@ -4,8 +4,10 @@ set -euo pipefail
 # MVProbe on the existing SVHN Small-CNN Zoo.
 #
 # Stage 1 (seed 0, validation only):
-#   4 weight tensors x 2 n_probes x 2 proj_dim x 2 learning rates = 32 configs
-#   30 epochs each; the held-out test split is never instantiated or evaluated.
+#   3 convolution weight tensors x 2 n_probes x 2 proj_dim x 2 learning rates
+#   x 2 batch sizes x 3 weight decays = 144 configs.
+#   60 epochs each by default; the held-out test split is never instantiated or evaluated.
+#   Scheduler: none (constant LR), matching the official MVProbe implementation.
 #
 # Stage 2:
 #   select highest best_val_tau, then run that exact configuration on seeds 0..4.
@@ -29,46 +31,48 @@ PYTHON="${PYTHON:-python}"
 [[ -s "$DATA_DIR/metrics.csv.gz" ]] || { echo "Missing $DATA_DIR/metrics.csv.gz" >&2; exit 2; }
 [[ -s "$SPLIT" ]] || { echo "Missing $SPLIT" >&2; exit 2; }
 
-SWEEP_EPOCHS="${SWEEP_EPOCHS:-30}"
-FINAL_EPOCHS="${FINAL_EPOCHS:-30}"
-BATCH_SIZE="${BATCH_SIZE:-128}"
+SWEEP_EPOCHS="${SWEEP_EPOCHS:-60}"
+FINAL_EPOCHS="${FINAL_EPOCHS:-150}"
 REP_DIM="${REP_DIM:-512}"
-WEIGHT_DECAY="${WEIGHT_DECAY:-1e-5}"
 DEVICE="${DEVICE:-cuda}"
 
-SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_sweep_s0"
-FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_best"
+SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_sweep_conv_s0"
+FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_best_conv"
 mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
 RUN=0
-TOTAL=32
-for LAYER in 0 1 2 3; do
+TOTAL=144
+for LAYER in 0 1 2; do
   for N_PROBES in 64 128; do
     for PROJ_DIM in 64 128; do
       for LR in 1e-4 3e-4; do
-        RUN=$((RUN + 1))
-        NAME="mvprobe_svhn_L${LAYER}_Q${N_PROBES}_P${PROJ_DIM}_lr${LR}_s0"
-        DIR="$SWEEP_ROOT/$NAME"
-        echo "========== SWEEP [$RUN/$TOTAL] layer=$LAYER Q=$N_PROBES proj=$PROJ_DIM lr=$LR =========="
-        if [[ -s "$DIR/summary.json" ]]; then
-          echo "Completed: $NAME (skipping)"
-          continue
-        fi
-        "$PYTHON" models/mvprobe_svhn_trainer.py \
-          --data_dir "$DATA_DIR" \
-          --split_csv "$SPLIT" \
-          --layer_index "$LAYER" \
-          --n_probes "$N_PROBES" \
-          --proj_dim "$PROJ_DIM" \
-          --rep_dim "$REP_DIM" \
-          --lr "$LR" \
-          --weight_decay "$WEIGHT_DECAY" \
-          --batch_size "$BATCH_SIZE" \
-          --epochs "$SWEEP_EPOCHS" \
-          --seed 0 \
-          --device "$DEVICE" \
-          --skip_test_eval \
-          --out_dir "$DIR"
+        for BATCH_SIZE in 64 128; do
+          for WEIGHT_DECAY in 0 1e-5 1e-4; do
+            RUN=$((RUN + 1))
+            NAME="mvprobe_svhn_L${LAYER}_Q${N_PROBES}_P${PROJ_DIM}_lr${LR}_bs${BATCH_SIZE}_wd${WEIGHT_DECAY}_s0"
+            DIR="$SWEEP_ROOT/$NAME"
+            echo "========== SWEEP [$RUN/$TOTAL] layer=$LAYER Q=$N_PROBES proj=$PROJ_DIM lr=$LR bs=$BATCH_SIZE wd=$WEIGHT_DECAY =========="
+            if [[ -s "$DIR/summary.json" ]]; then
+              echo "Completed: $NAME (skipping)"
+              continue
+            fi
+            "$PYTHON" models/mvprobe_svhn_trainer.py \
+              --data_dir "$DATA_DIR" \
+              --split_csv "$SPLIT" \
+              --layer_index "$LAYER" \
+              --n_probes "$N_PROBES" \
+              --proj_dim "$PROJ_DIM" \
+              --rep_dim "$REP_DIM" \
+              --lr "$LR" \
+              --weight_decay "$WEIGHT_DECAY" \
+              --batch_size "$BATCH_SIZE" \
+              --epochs "$SWEEP_EPOCHS" \
+              --seed 0 \
+              --device "$DEVICE" \
+              --skip_test_eval \
+              --out_dir "$DIR"
+          done
+        done
       done
     done
   done
@@ -92,13 +96,15 @@ for path in root.glob("*/summary.json"):
         "proj_dim": int(s["proj_dim"]),
         "rep_dim": int(s["rep_dim"]),
         "lr": float(s["lr"]),
+        "batch_size": int(s["batch_size"]),
+        "weight_decay": float(s["weight_decay"]),
         "best_val_tau": float(s["best_val_tau"]),
         "best_epoch": int(s["best_epoch"]),
         "params": int(s["params"]),
     })
 
-if len(rows) != 32:
-    raise RuntimeError(f"Expected 32 completed sweep configs, found {len(rows)}")
+if len(rows) != 144:
+    raise RuntimeError(f"Expected 144 completed sweep configs, found {len(rows)}")
 
 rows.sort(key=lambda r: r["best_val_tau"], reverse=True)
 fields = list(rows[0])
@@ -115,22 +121,25 @@ for k, v in best.items():
 print(f"Ranked results: {root / 'sweep_results.csv'}")
 PY
 
-read -r BEST_LAYER BEST_Q BEST_PROJ BEST_REP BEST_LR < <(
+read -r BEST_LAYER BEST_Q BEST_PROJ BEST_REP BEST_LR BEST_BS BEST_WD < <(
   "$PYTHON" - "$SWEEP_ROOT/selected_config.json" <<'PY'
 import json, sys
 s = json.load(open(sys.argv[1]))
-print(s["layer_index"], s["n_probes"], s["proj_dim"], s["rep_dim"], s["lr"])
+print(
+    s["layer_index"], s["n_probes"], s["proj_dim"], s["rep_dim"],
+    s["lr"], s["batch_size"], s["weight_decay"]
+)
 PY
 )
 
 echo
 echo "========== FINAL CONFIG =========="
-echo "layer=$BEST_LAYER Q=$BEST_Q proj_dim=$BEST_PROJ rep_dim=$BEST_REP lr=$BEST_LR epochs=$FINAL_EPOCHS"
+echo "layer=$BEST_LAYER Q=$BEST_Q proj_dim=$BEST_PROJ rep_dim=$BEST_REP lr=$BEST_LR bs=$BEST_BS wd=$BEST_WD epochs=$FINAL_EPOCHS"
 echo "=================================="
 
 SUMMARIES=()
 for SEED in 0 1 2 3 4; do
-  NAME="mvprobe_svhn_L${BEST_LAYER}_Q${BEST_Q}_P${BEST_PROJ}_lr${BEST_LR}_s${SEED}"
+  NAME="mvprobe_svhn_L${BEST_LAYER}_Q${BEST_Q}_P${BEST_PROJ}_lr${BEST_LR}_bs${BEST_BS}_wd${BEST_WD}_s${SEED}"
   DIR="$FINAL_ROOT/$NAME"
   SUMMARIES+=("$DIR/summary.json")
   if [[ -s "$DIR/summary.json" ]]; then
@@ -145,8 +154,8 @@ for SEED in 0 1 2 3 4; do
     --proj_dim "$BEST_PROJ" \
     --rep_dim "$BEST_REP" \
     --lr "$BEST_LR" \
-    --weight_decay "$WEIGHT_DECAY" \
-    --batch_size "$BATCH_SIZE" \
+    --weight_decay "$BEST_WD" \
+    --batch_size "$BEST_BS" \
     --epochs "$FINAL_EPOCHS" \
     --seed "$SEED" \
     --device "$DEVICE" \
@@ -171,7 +180,9 @@ print(
     f"layer={selected['layer_index']} ({selected['layer_name']}), "
     f"X={selected['matrix_shape']}, Q={selected['n_probes']}, "
     f"proj_dim={selected['proj_dim']}, rep_dim={selected['rep_dim']}, "
-    f"lr={selected['lr']}, sweep_val_tau={selected['best_val_tau']:.4f}"
+    f"lr={selected['lr']}, batch_size={selected['batch_size']}, "
+    f"weight_decay={selected['weight_decay']}, "
+    f"sweep_val_tau={selected['best_val_tau']:.4f}"
 )
 print_final_summary(
     method="MVProbe",
