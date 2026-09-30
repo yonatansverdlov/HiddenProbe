@@ -4,8 +4,8 @@ set -euo pipefail
 # MVProbe on the existing SVHN Small-CNN Zoo.
 #
 # Stage 1 (seed 0, validation only):
-#   3 convolution weight tensors x 2 n_probes x 2 proj_dim x 2 learning rates
-#   x 2 batch sizes x 3 weight decays = 144 configs.
+#   3 convolution weight tensors x 2 n_probes x 2 proj_dim x 3 learning rates
+#   x 2 batch sizes x 3 weight decays = 216 configs.
 #   60 epochs each by default; the held-out test split is never instantiated or evaluated.
 #   Scheduler: none (constant LR), matching the official MVProbe implementation.
 #
@@ -41,11 +41,11 @@ FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_best_conv"
 mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
 RUN=0
-TOTAL=144
+TOTAL=216
 for LAYER in 0 1 2; do
   for N_PROBES in 64 128; do
     for PROJ_DIM in 64 128; do
-      for LR in 1e-4 3e-4; do
+      for LR in 1e-4 3e-4 5e-4; do
         for BATCH_SIZE in 64 128; do
           for WEIGHT_DECAY in 0 1e-5 1e-4; do
             RUN=$((RUN + 1))
@@ -103,8 +103,8 @@ for path in root.glob("*/summary.json"):
         "params": int(s["params"]),
     })
 
-if len(rows) != 144:
-    raise RuntimeError(f"Expected 144 completed sweep configs, found {len(rows)}")
+if len(rows) != 216:
+    raise RuntimeError(f"Expected 216 completed sweep configs, found {len(rows)}")
 
 rows.sort(key=lambda r: r["best_val_tau"], reverse=True)
 fields = list(rows[0])
