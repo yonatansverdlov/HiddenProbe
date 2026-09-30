@@ -55,6 +55,10 @@ for LAYER in 0 1; do
               --proj_dim "$PROJ_DIM" \
               --rep_dim "$REP_DIM" \
               --lr "$LR" \
+              --scheduler plateau \
+              --plateau_factor "$PLATEAU_FACTOR" \
+              --plateau_patience "$PLATEAU_PATIENCE" \
+              --plateau_min_lr "$PLATEAU_MIN_LR" \
               --weight_decay "$WEIGHT_DECAY" \
               --batch_size "$BATCH_SIZE" \
               --epochs "$SWEEP_EPOCHS" \
