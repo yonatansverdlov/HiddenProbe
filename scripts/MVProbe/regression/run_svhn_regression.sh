@@ -7,7 +7,7 @@ set -euo pipefail
 #   3 convolution weight tensors x 2 n_probes x 2 proj_dim x 3 learning rates
 #   x 2 batch sizes x 3 weight decays = 216 configs.
 #   60 epochs each by default; the held-out test split is never instantiated or evaluated.
-#   Scheduler: none (constant LR), matching the official MVProbe implementation.
+#   Scheduler: ReduceLROnPlateau on validation metric.
 #
 # Stage 2:
 #   select highest best_val_tau, then run that exact configuration on seeds 0..4.
@@ -35,9 +35,12 @@ SWEEP_EPOCHS="${SWEEP_EPOCHS:-60}"
 FINAL_EPOCHS="${FINAL_EPOCHS:-150}"
 REP_DIM="${REP_DIM:-512}"
 DEVICE="${DEVICE:-cuda}"
+PLATEAU_FACTOR="${PLATEAU_FACTOR:-0.5}"
+PLATEAU_PATIENCE="${PLATEAU_PATIENCE:-5}"
+PLATEAU_MIN_LR="${PLATEAU_MIN_LR:-1e-6}"
 
-SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_sweep_conv_s0"
-FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_best_conv"
+SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_sweep_conv_plateau_s0"
+FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_svhn_best_conv_plateau"
 mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
 RUN=0
@@ -154,6 +157,10 @@ for SEED in 0 1 2 3 4; do
     --proj_dim "$BEST_PROJ" \
     --rep_dim "$BEST_REP" \
     --lr "$BEST_LR" \
+    --scheduler plateau \
+    --plateau_factor "$PLATEAU_FACTOR" \
+    --plateau_patience "$PLATEAU_PATIENCE" \
+    --plateau_min_lr "$PLATEAU_MIN_LR" \
     --weight_decay "$BEST_WD" \
     --batch_size "$BEST_BS" \
     --epochs "$FINAL_EPOCHS" \
