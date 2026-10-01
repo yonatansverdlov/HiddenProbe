@@ -45,7 +45,8 @@ for LAYER in 0 1 2 3; do
               echo "Completed: $NAME (skipping)"
               continue
             fi
-            "$PYTHON" models/probex_inr_trainer.py \
+            "$PYTHON" models/mvprobe_inr_trainer.py \
+              --model_variant probex \
               --data_dir "$DATA_DIR" \
               --split_json "$SPLIT" \
               --dataset_name "CIFAR-10 INR non-aug" \
@@ -144,7 +145,8 @@ for SEED in 0 1 2 3 4; do
     echo "Completed final seed $SEED (skipping)"
     continue
   fi
-  "$PYTHON" models/probex_inr_trainer.py \
+  "$PYTHON" models/mvprobe_inr_trainer.py \
+    --model_variant probex \
     --data_dir "$DATA_DIR" \
     --split_json "$SPLIT" \
     --dataset_name "CIFAR-10 INR non-aug" \
