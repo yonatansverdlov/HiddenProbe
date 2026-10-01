@@ -34,7 +34,8 @@ from torch.utils.data import DataLoader, Dataset
 from data import make_split
 from models.logging_utils import print_eval, print_run_config, print_seed_result
 from models.metrics_cnn import kendall_tau_b
-from models.mvprobe import ProbeXRegression
+from models.mvprobe import ProbeXRegression as MVProbeRegression
+from models.probex import ProbeXRegression as OriginalProbeXRegression
 
 
 def fix_seed(seed: int) -> None:
@@ -145,6 +146,7 @@ def evaluate(model, loader, device):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", required=True)
+    ap.add_argument("--model_variant", choices=["mvprobe", "probex"], default="mvprobe")
     ap.add_argument("--split_csv", default="split.csv")
     ap.add_argument("--layer_index", type=int, required=True)
     ap.add_argument("--n_probes", type=int, default=128)
@@ -189,7 +191,8 @@ def main():
         if test_ds is not None else None
     )
 
-    model = ProbeXRegression(
+    model_cls = MVProbeRegression if args.model_variant == "mvprobe" else OriginalProbeXRegression
+    model = model_cls(
         input_shape=train_ds.matrix_shape,
         n_probes=args.n_probes,
         proj_dim=args.proj_dim,
@@ -210,7 +213,7 @@ def main():
 
     total_params = sum(p.numel() for p in model.parameters())
     print_run_config(
-        method="MVProbe",
+        method=("MVProbe" if args.model_variant == "mvprobe" else "ProbeX"),
         task="regression",
         dataset=f"SVHN / layer {args.layer_index}",
         seed=args.seed,
@@ -281,7 +284,8 @@ def main():
         raise RuntimeError("No validation checkpoint was selected")
 
     summary = {
-        "method": "MVProbe",
+        "method": ("MVProbe" if args.model_variant == "mvprobe" else "ProbeX"),
+        "model_variant": args.model_variant,
         "dataset": "SVHN",
         "seed": args.seed,
         "layer_index": args.layer_index,
