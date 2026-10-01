@@ -59,7 +59,8 @@ for LAYER in 0 1 2; do
               echo "Completed: $NAME (skipping)"
               continue
             fi
-            "$PYTHON" models/probex_svhn_trainer.py \
+            "$PYTHON" models/mvprobe_svhn_trainer.py \
+              --model_variant probex \
               --data_dir "$DATA_DIR" \
               --split_csv "$SPLIT" \
               --layer_index "$LAYER" \
@@ -155,7 +156,8 @@ for SEED in 0 1 2 3 4; do
     echo "Completed final seed $SEED (skipping)"
     continue
   fi
-  "$PYTHON" models/probex_svhn_trainer.py \
+  "$PYTHON" models/mvprobe_svhn_trainer.py \
+    --model_variant probex \
     --data_dir "$DATA_DIR" \
     --split_csv "$SPLIT" \
     --layer_index "$BEST_LAYER" \
