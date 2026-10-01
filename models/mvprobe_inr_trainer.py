@@ -27,7 +27,8 @@ from torch.utils.data import DataLoader, Dataset
 
 from data import _remap_siren_keys
 from models.logging_utils import print_eval, print_run_config, print_seed_result
-from models.mvprobe import ProbeXClassification
+from models.mvprobe import ProbeXClassification as MVProbeClassification
+from models.probex import ProbeXClassification as OriginalProbeXClassification
 
 
 def fix_seed(seed: int) -> None:
@@ -175,6 +176,7 @@ def evaluate(model, loader, device):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", required=True)
+    ap.add_argument("--model_variant", choices=["mvprobe", "probex"], default="mvprobe")
     ap.add_argument("--split_json", required=True)
     ap.add_argument("--dataset_name", required=True)
     ap.add_argument("--n_classes", type=int, required=True)
@@ -224,7 +226,8 @@ def main():
         if test_ds is not None else None
     )
 
-    model = ProbeXClassification(
+    model_cls = MVProbeClassification if args.model_variant == "mvprobe" else OriginalProbeXClassification
+    model = model_cls(
         input_shape=train_ds.matrix_shape,
         n_probes=args.n_probes,
         proj_dim=args.proj_dim,
@@ -246,7 +249,7 @@ def main():
 
     total_params = sum(p.numel() for p in model.parameters())
     print_run_config(
-        method="MVProbe",
+        method=("MVProbe" if args.model_variant == "mvprobe" else "ProbeX"),
         task="classification",
         dataset=f"{args.dataset_name} / layer {args.layer_index}",
         seed=args.seed,
@@ -317,7 +320,8 @@ def main():
         raise RuntimeError("No validation checkpoint was selected")
 
     summary = {
-        "method": "MVProbe",
+        "method": ("MVProbe" if args.model_variant == "mvprobe" else "ProbeX"),
+        "model_variant": args.model_variant,
         "task": "classification",
         "dataset": args.dataset_name,
         "seed": args.seed,
