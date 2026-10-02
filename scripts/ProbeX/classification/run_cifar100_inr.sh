@@ -28,6 +28,20 @@ SWEEP_ROOT="${OUT_DIR:-checkpoints}/probex_cifar100_inr_sweep_plateau_factor_s0"
 FINAL_ROOT="${OUT_DIR:-checkpoints}/probex_cifar100_inr_best_plateau_factor"
 mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
+is_complete_summary() {
+  local summary="$1"
+  [[ -s "$summary" ]] || return 1
+  "$PYTHON" - "$summary" <<'PY' >/dev/null 2>&1
+import json, sys
+with open(sys.argv[1]) as f:
+    s = json.load(f)
+required = {"best_epoch", "params"}
+if not required.issubset(s):
+    raise SystemExit(1)
+PY
+}
+
+
 RUN=0
 TOTAL=576
 for LAYER in 0 1; do
@@ -40,9 +54,14 @@ for LAYER in 0 1; do
               RUN=$((RUN + 1))
             NAME="probex_cifar100_inr_L${LAYER}_Q${N_PROBES}_P${PROJ_DIM}_lr${LR}_bs${BATCH_SIZE}_wd${WEIGHT_DECAY}_fac${PLATEAU_FACTOR}_s0"
             DIR="$SWEEP_ROOT/$NAME"
+            echo
+            echo "================================================================================"
+            echo "CONFIG $RUN/$TOTAL"
+            echo "================================================================================"
             echo "========== SWEEP [$RUN/$TOTAL] layer=$LAYER Q=$N_PROBES proj=$PROJ_DIM lr=$LR bs=$BATCH_SIZE wd=$WEIGHT_DECAY factor=$PLATEAU_FACTOR =========="
-            if [[ -s "$DIR/summary.json" ]]; then
-              echo "Completed: $NAME (skipping)"
+            if is_complete_summary "$DIR/summary.json"; then
+              echo "CONFIG $RUN/$TOTAL already completed: $NAME"
+              echo "Skipping."
               continue
             fi
             "$PYTHON" models/mvprobe_inr_trainer.py \
@@ -137,12 +156,19 @@ echo "layer=$BEST_LAYER Q=$BEST_Q proj_dim=$BEST_PROJ rep_dim=$BEST_REP lr=$BEST
 echo "=================================="
 
 SUMMARIES=()
+FINAL_RUN=0
 for SEED in 0 1 2 3 4; do
+  FINAL_RUN=$((FINAL_RUN + 1))
   NAME="probex_cifar100_inr_L${BEST_LAYER}_Q${BEST_Q}_P${BEST_PROJ}_lr${BEST_LR}_bs${BEST_BS}_wd${BEST_WD}_fac${BEST_FACTOR}_s${SEED}"
   DIR="$FINAL_ROOT/$NAME"
   SUMMARIES+=("$DIR/summary.json")
-  if [[ -s "$DIR/summary.json" ]]; then
-    echo "Completed final seed $SEED (skipping)"
+  echo
+  echo "================================================================================"
+  echo "FINAL $FINAL_RUN/5 | seed=$SEED"
+  echo "================================================================================"
+  if is_complete_summary "$DIR/summary.json"; then
+    echo "Final seed $SEED already completed: $NAME"
+    echo "Skipping."
     continue
   fi
   "$PYTHON" models/mvprobe_inr_trainer.py \
