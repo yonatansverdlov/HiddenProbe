@@ -30,12 +30,13 @@ mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
 is_complete_summary() {
   local summary="$1"
+  local required_key="$2"
   [[ -s "$summary" ]] || return 1
-  "$PYTHON" - "$summary" <<'PY' >/dev/null 2>&1
+  "$PYTHON" - "$summary" "$required_key" <<'PY' >/dev/null 2>&1
 import json, sys
 with open(sys.argv[1]) as f:
     s = json.load(f)
-required = {"best_epoch", "params"}
+required = {"best_epoch", "params", sys.argv[2]}
 if not required.issubset(s):
     raise SystemExit(1)
 PY
@@ -59,7 +60,7 @@ for LAYER in 0 1 2 3; do
             echo "CONFIG $RUN/$TOTAL"
             echo "================================================================================"
             echo "========== SWEEP [$RUN/$TOTAL] layer=$LAYER Q=$N_PROBES proj=$PROJ_DIM lr=$LR bs=$BATCH_SIZE wd=$WEIGHT_DECAY factor=$PLATEAU_FACTOR =========="
-            if is_complete_summary "$DIR/summary.json"; then
+            if is_complete_summary "$DIR/summary.json" "best_val_acc"; then
               echo "CONFIG $RUN/$TOTAL already completed: $NAME"
               echo "Skipping."
               continue
@@ -166,7 +167,7 @@ for SEED in 0 1 2 3 4; do
   echo "================================================================================"
   echo "FINAL $FINAL_RUN/5 | seed=$SEED"
   echo "================================================================================"
-  if is_complete_summary "$DIR/summary.json"; then
+  if is_complete_summary "$DIR/summary.json" "final_test_acc"; then
     echo "Final seed $SEED already completed: $NAME"
     echo "Skipping."
     continue
