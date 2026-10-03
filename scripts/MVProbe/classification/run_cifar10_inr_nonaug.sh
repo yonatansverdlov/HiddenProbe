@@ -44,8 +44,8 @@ PY
 
 
 RUN=0
-TOTAL=1152
-for LAYER in 0 1 2 3; do
+TOTAL=576
+for LAYER in 0 1; do
   for N_PROBES in 64 128; do
     for PROJ_DIM in 64 128; do
       for LR in 1e-4 3e-4 5e-4; do
