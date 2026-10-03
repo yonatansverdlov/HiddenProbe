@@ -181,7 +181,7 @@ def infer_inr_arch(state_dict):
     Keys are `seq.{i}.weight` / `seq.{i}.bias`. `n_layers` counts Linears
     (in->h, h->h, ..., h->out), so hidden layers = n_layers - 1. Zoos differ in
     depth/width/out_features: fmnist+mnist INRs are 2->32->32->1 (n_layers=3, 2 hidden);
-    cifar10 INRs are 2->32->32->32->32->3 (n_layers=5, 4 hidden, RGB out).
+    the NFN/DWS CIFAR10 and DNG CIFAR100 INRs used here are 2->32->32->3 (n_layers=3, 2 hidden, RGB out).
     """
     ws = sorted(
         ((int(k.split(".")[1]), v) for k, v in state_dict.items()
