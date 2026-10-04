@@ -32,6 +32,7 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from datasets import load_dataset
 from safetensors.torch import save_file
 from torch.optim import AdamW
@@ -39,10 +40,8 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision.datasets import CIFAR100
 from torchvision.transforms import (
     Compose,
-    Normalize,
     RandomCrop,
     RandomHorizontalFlip,
-    Resize,
     ToTensor,
 )
 from transformers import AutoConfig, AutoImageProcessor, AutoModelForImageClassification, get_scheduler
@@ -103,6 +102,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--warmup_ratio", type=float, default=0.1,
                    help="Used only for scheduler names containing 'warmup'.")
     p.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument(
+        "--eval_every",
+        type=int,
+        default=0,
+        help="Validate every N epochs; 0 evaluates only once after training (fast default).",
+    )
+    p.add_argument(
+        "--channels_last",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use channels-last CUDA convolutions when available.",
+    )
     p.add_argument("--save_dtype", choices=["float32", "float16"], default="float32")
     p.add_argument("--force", action="store_true",
                    help="Retrain even if a complete output already exists.")
@@ -242,15 +253,18 @@ def make_transforms(
     random_crop: bool,
     random_flip: bool,
 ):
+    # Keep CPU-side work at CIFAR resolution. Resize + normalization are applied
+    # to whole batches on the GPU, which is substantially faster than resizing
+    # 32x32 -> 224x224 independently in DataLoader workers.
     size, mean, std = processor_settings(base_model)
     train_ops = []
     if random_crop:
         train_ops.append(RandomCrop(32, padding=4))
     if random_flip:
         train_ops.append(RandomHorizontalFlip())
-    train_ops.extend([Resize((size, size)), ToTensor(), Normalize(mean=mean, std=std)])
-    eval_ops = [Resize((size, size)), ToTensor(), Normalize(mean=mean, std=std)]
-    return Compose(train_ops), Compose(eval_ops), size
+    train_ops.append(ToTensor())
+    eval_ops = [ToTensor()]
+    return Compose(train_ops), Compose(eval_ops), size, mean, std
 
 
 def make_loaders(
@@ -278,7 +292,7 @@ def make_loaders(
     train_idx, val_idx, test_idx = make_class_indices(
         train_base, test_base, class_ids, split_seed
     )
-    train_tf, eval_tf, image_size = make_transforms(
+    train_tf, eval_tf, image_size, image_mean, image_std = make_transforms(
         base_model, random_crop, random_flip
     )
 
@@ -306,17 +320,55 @@ def make_loaders(
         drop_last=False,
         **kwargs,
     )
-    return train_loader, val_loader, test_loader, label_map, image_size
+    return (
+        train_loader, val_loader, test_loader, label_map,
+        image_size, image_mean, image_std,
+    )
+
+
+def preprocess_batch(
+    images: torch.Tensor,
+    device: torch.device,
+    image_size: int,
+    mean: torch.Tensor,
+    std: torch.Tensor,
+    non_blocking: bool,
+    channels_last: bool,
+) -> torch.Tensor:
+    images = images.to(device, non_blocking=non_blocking)
+    if images.shape[-2:] != (image_size, image_size):
+        images = F.interpolate(
+            images,
+            size=(image_size, image_size),
+            mode="bilinear",
+            align_corners=False,
+            antialias=True,
+        )
+    images = (images - mean) / std
+    if channels_last and device.type == "cuda":
+        images = images.contiguous(memory_format=torch.channels_last)
+    return images
 
 
 @torch.no_grad()
-def evaluate(model, loader: DataLoader, device: torch.device) -> dict[str, float]:
+def evaluate(
+    model,
+    loader: DataLoader,
+    device: torch.device,
+    image_size: int,
+    mean: torch.Tensor,
+    std: torch.Tensor,
+    channels_last: bool,
+) -> dict[str, float]:
     model.eval()
     total_loss = 0.0
     total_correct = 0
     total = 0
     for images, labels in loader:
-        images = images.to(device, non_blocking=bool(getattr(loader, "pin_memory", False)))
+        images = preprocess_batch(
+            images, device, image_size, mean, std,
+            bool(getattr(loader, "pin_memory", False)), channels_last,
+        )
         labels = labels.to(device, non_blocking=bool(getattr(loader, "pin_memory", False)))
         out = model(pixel_values=images, labels=labels)
         batch = labels.numel()
@@ -408,7 +460,10 @@ def train_one(
     random_flip = bool(row["random_flip"])
 
     seed_everything(seed)
-    train_loader, val_loader, test_loader, label_map, image_size = make_loaders(
+    (
+        train_loader, val_loader, test_loader, label_map,
+        image_size, image_mean, image_std,
+    ) = make_loaders(
         train_base=train_base,
         test_base=test_base,
         selected_names=selected_names,
@@ -456,14 +511,30 @@ def train_one(
     )
     device = torch.device(args.device if args.device != "cuda" or torch.cuda.is_available() else "cpu")
     model.to(device)
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        if args.channels_last:
+            model = model.to(memory_format=torch.channels_last)
 
-    optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    try:
+        optimizer = AdamW(
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay,
+            fused=(device.type == "cuda"),
+        )
+    except (TypeError, RuntimeError):
+        optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler, warmup_steps = scheduler_from_row(
         optimizer, scheduler_name, expected_steps, args.warmup_ratio
     )
 
     use_amp = bool(args.amp and device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+    mean_t = torch.tensor(image_mean, device=device).view(1, 3, 1, 1)
+    std_t = torch.tensor(image_std, device=device).view(1, 3, 1, 1)
 
     best_val_acc = -math.inf
     best_epoch = -1
@@ -479,7 +550,10 @@ def train_one(
         train_total = 0
 
         for images, labels in train_loader:
-            images = images.to(device, non_blocking=bool(train_loader.pin_memory))
+            images = preprocess_batch(
+                images, device, image_size, mean_t, std_t,
+                bool(train_loader.pin_memory), args.channels_last,
+            )
             labels = labels.to(device, non_blocking=bool(train_loader.pin_memory))
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(
@@ -503,30 +577,52 @@ def train_one(
             "loss": train_loss_sum / max(train_total, 1),
             "accuracy": train_correct / max(train_total, 1),
         }
-        val_metrics = evaluate(model, val_loader, device)
         elapsed = time.time() - start
-        print(
-            f"EPOCH {epoch:02d}/{epochs:02d} | "
-            f"train_acc={train_metrics['accuracy']:.4f} "
-            f"val_acc={val_metrics['accuracy']:.4f} "
-            f"train_loss={train_metrics['loss']:.4f} "
-            f"val_loss={val_metrics['loss']:.4f} "
-            f"lr={optimizer.param_groups[0]['lr']:.3e} "
-            f"elapsed={elapsed/60:.1f}m"
-        )
+        do_eval = args.eval_every > 0 and (epoch % args.eval_every == 0 or epoch == epochs)
+        if do_eval:
+            val_metrics = evaluate(
+                model, val_loader, device, image_size, mean_t, std_t, args.channels_last
+            )
+            print(
+                f"EPOCH {epoch:02d}/{epochs:02d} | "
+                f"train_acc={train_metrics['accuracy']:.4f} "
+                f"val_acc={val_metrics['accuracy']:.4f} "
+                f"train_loss={train_metrics['loss']:.4f} "
+                f"val_loss={val_metrics['loss']:.4f} "
+                f"lr={optimizer.param_groups[0]['lr']:.3e} "
+                f"elapsed={elapsed/60:.1f}m"
+            )
+            if val_metrics["accuracy"] > best_val_acc:
+                best_val_acc = val_metrics["accuracy"]
+                best_epoch = epoch
+                best_train = dict(train_metrics)
+                best_val = dict(val_metrics)
+                best_state = cpu_state_dict(model, torch.float32)
+        else:
+            print(
+                f"EPOCH {epoch:02d}/{epochs:02d} | "
+                f"train_acc={train_metrics['accuracy']:.4f} "
+                f"train_loss={train_metrics['loss']:.4f} "
+                f"lr={optimizer.param_groups[0]['lr']:.3e} "
+                f"elapsed={elapsed/60:.1f}m"
+            )
 
-        if val_metrics["accuracy"] > best_val_acc:
-            best_val_acc = val_metrics["accuracy"]
-            best_epoch = epoch
-            best_train = dict(train_metrics)
-            best_val = dict(val_metrics)
-            best_state = cpu_state_dict(model, torch.float32)
+    if args.eval_every > 0 and best_state is not None:
+        model.load_state_dict(best_state)
+        model.to(device)
+    else:
+        best_epoch = epochs
+        best_train = dict(train_metrics)
+        best_state = cpu_state_dict(model, torch.float32)
 
-    if best_state is None:
-        raise RuntimeError("No best state was recorded")
-    model.load_state_dict(best_state)
-    model.to(device)
-    test_metrics = evaluate(model, test_loader, device)
+    val_metrics = evaluate(
+        model, val_loader, device, image_size, mean_t, std_t, args.channels_last
+    )
+    best_val = dict(val_metrics)
+    best_val_acc = val_metrics["accuracy"]
+    test_metrics = evaluate(
+        model, test_loader, device, image_size, mean_t, std_t, args.channels_last
+    )
 
     model_dir.mkdir(parents=True, exist_ok=True)
     save_dtype = torch.float32 if args.save_dtype == "float32" else torch.float16
@@ -567,6 +663,9 @@ def train_one(
         "random_crop": random_crop,
         "random_flip": random_flip,
         "image_size": image_size,
+        "gpu_batch_preprocessing": True,
+        "eval_every": args.eval_every,
+        "channels_last": bool(args.channels_last),
         "best_epoch": best_epoch,
         "train_loss": best_train["loss"],
         "train_accuracy": best_train["accuracy"],
