@@ -128,9 +128,10 @@ The split is fixed by `--split_seed` and is shared across architectures.
 This is deliberate: ResNet18 and ResNet50 see the exact same images for a
 given Model-J row.
 
-The target classifier keeps a **100-way CIFAR100 head** and original CIFAR100
-label IDs even though each model only sees 50 classes. This matches the
-parameter count and setup of the published Model-J ResNet models.
+Each target model uses a **50-way classifier head** over its selected CIFAR100
+subset. The 50 chosen original CIFAR100 labels are deterministically remapped
+to local IDs 0..49 for that model. The original class names/IDs are still
+stored in metadata for the downstream 100-dimensional meta-label.
 
 Scheduler names are copied from Model-J. For scheduler variants containing
 `warmup`, the source metadata does not expose a warmup length, so this
