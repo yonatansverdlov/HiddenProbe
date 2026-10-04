@@ -60,7 +60,7 @@ SOURCE_SUBSET = "ResNet"
 TRAIN_PER_CLASS = 425
 VAL_PER_CLASS = 75
 N_SELECTED_CLASSES = 50
-GENERATION_VERSION = 2
+GENERATION_VERSION = 3
 
 
 def parse_args() -> argparse.Namespace:
@@ -212,48 +212,62 @@ class CIFARSubset(Dataset):
         return image, self.label_map[original_label]
 
 
-def cache_cifar_in_memory(train_base: CIFAR100, test_base: CIFAR100):
-    """Convert CIFAR100 to compact CHW uint8 tensors once for the entire run."""
-    train_images = torch.from_numpy(train_base.data).permute(0, 3, 1, 2).contiguous()
-    test_images = torch.from_numpy(test_base.data).permute(0, 3, 1, 2).contiguous()
+def cache_cifar_in_memory(
+    train_base: CIFAR100,
+    test_base: CIFAR100,
+    split_seed: int,
+):
+    """Create one shared uint8 tensor view and one fixed stratified split per class."""
+    # torch.from_numpy shares the underlying CIFAR numpy storage; permute is a
+    # view, so this does not duplicate the full image dataset in RAM.
+    train_images = torch.from_numpy(train_base.data).permute(0, 3, 1, 2)
+    test_images = torch.from_numpy(test_base.data).permute(0, 3, 1, 2)
     train_targets = torch.as_tensor(train_base.targets, dtype=torch.long)
     test_targets = torch.as_tensor(test_base.targets, dtype=torch.long)
 
-    train_by_class = {
-        class_id: torch.nonzero(train_targets == class_id, as_tuple=False).squeeze(1).numpy()
-        for class_id in range(100)
-    }
-    test_by_class = {
-        class_id: torch.nonzero(test_targets == class_id, as_tuple=False).squeeze(1).numpy()
-        for class_id in range(100)
-    }
-    return train_images, train_targets, test_images, test_targets, train_by_class, test_by_class
+    train_by_class: dict[int, np.ndarray] = {}
+    val_by_class: dict[int, np.ndarray] = {}
+    test_by_class: dict[int, np.ndarray] = {}
+
+    for class_id in range(100):
+        idx = torch.nonzero(train_targets == class_id, as_tuple=False).squeeze(1).numpy()
+        if len(idx) != 500:
+            raise ValueError(
+                f"CIFAR100 class {class_id} has {len(idx)} train images, expected 500"
+            )
+        idx = idx.copy()
+        rng = np.random.default_rng(split_seed + class_id)
+        rng.shuffle(idx)
+        train_by_class[class_id] = idx[:TRAIN_PER_CLASS]
+        val_by_class[class_id] = idx[TRAIN_PER_CLASS:TRAIN_PER_CLASS + VAL_PER_CLASS]
+
+        t_idx = torch.nonzero(test_targets == class_id, as_tuple=False).squeeze(1).numpy()
+        if len(t_idx) != 100:
+            raise ValueError(
+                f"CIFAR100 class {class_id} has {len(t_idx)} test images, expected 100"
+            )
+        test_by_class[class_id] = t_idx
+
+    return (
+        train_images, train_targets, test_images, test_targets,
+        train_by_class, val_by_class, test_by_class,
+    )
 
 
 def make_class_indices(
     train_by_class: dict[int, np.ndarray],
+    val_by_class: dict[int, np.ndarray],
     test_by_class: dict[int, np.ndarray],
     class_ids: list[int],
-    split_seed: int,
 ) -> tuple[list[int], list[int], list[int]]:
     train_idx: list[int] = []
     val_idx: list[int] = []
     test_idx: list[int] = []
 
     for class_id in class_ids:
-        idx = train_by_class[class_id]
-        if len(idx) != 500:
-            raise ValueError(f"CIFAR100 class {class_id} has {len(idx)} train images, expected 500")
-        rng = np.random.default_rng(split_seed + int(class_id))
-        idx = idx.copy()
-        rng.shuffle(idx)
-        train_idx.extend(idx[:TRAIN_PER_CLASS].tolist())
-        val_idx.extend(idx[TRAIN_PER_CLASS:TRAIN_PER_CLASS + VAL_PER_CLASS].tolist())
-
-        t_idx = test_by_class[class_id]
-        if len(t_idx) != 100:
-            raise ValueError(f"CIFAR100 class {class_id} has {len(t_idx)} test images, expected 100")
-        test_idx.extend(t_idx.tolist())
+        train_idx.extend(train_by_class[class_id].tolist())
+        val_idx.extend(val_by_class[class_id].tolist())
+        test_idx.extend(test_by_class[class_id].tolist())
 
     return train_idx, val_idx, test_idx
 
@@ -273,14 +287,15 @@ def processor_settings(base_model: str) -> tuple[int, list[float], list[float]]:
 
 
 def make_transforms(
-    base_model: str,
+    image_size: int,
+    image_mean: list[float],
+    image_std: list[float],
     random_crop: bool,
     random_flip: bool,
 ):
     # Keep CPU-side work at CIFAR resolution. Resize + normalization are applied
     # to whole batches on the GPU, which is substantially faster than resizing
     # 32x32 -> 224x224 independently in DataLoader workers.
-    size, mean, std = processor_settings(base_model)
     train_ops = []
     if random_crop:
         train_ops.append(RandomCrop(32, padding=4))
@@ -289,7 +304,7 @@ def make_transforms(
     eval_ops = []
     train_transform = Compose(train_ops) if train_ops else None
     eval_transform = None
-    return train_transform, eval_transform, size, mean, std
+    return train_transform, eval_transform, image_size, image_mean, image_std
 
 
 def make_loaders(
@@ -298,6 +313,7 @@ def make_loaders(
     test_images: torch.Tensor,
     test_targets: torch.Tensor,
     train_by_class: dict[int, np.ndarray],
+    val_by_class: dict[int, np.ndarray],
     test_by_class: dict[int, np.ndarray],
     cifar_classes: list[str],
     selected_names: list[str],
@@ -305,10 +321,11 @@ def make_loaders(
     num_workers: int,
     pin_memory: bool,
     persistent_workers: bool,
-    split_seed: int,
     random_crop: bool,
     random_flip: bool,
-    base_model: str,
+    image_size: int,
+    image_mean: list[float],
+    image_std: list[float],
 ) -> tuple[DataLoader, DataLoader, DataLoader, dict[int, int], int]:
     name_to_id = {name: i for i, name in enumerate(cifar_classes)}
     missing = sorted(set(selected_names) - set(name_to_id))
@@ -320,10 +337,10 @@ def make_loaders(
     # CIFAR100 subset. Remap the selected original class IDs to local IDs 0..49.
     label_map = {class_id: local_id for local_id, class_id in enumerate(class_ids)}
     train_idx, val_idx, test_idx = make_class_indices(
-        train_by_class, test_by_class, class_ids, split_seed
+        train_by_class, val_by_class, test_by_class, class_ids
     )
     train_tf, eval_tf, image_size, image_mean, image_std = make_transforms(
-        base_model, random_crop, random_flip
+        image_size, image_mean, image_std, random_crop, random_flip
     )
 
     kwargs = {
@@ -543,7 +560,11 @@ def train_one(
     test_images: torch.Tensor,
     test_targets: torch.Tensor,
     train_by_class: dict[int, np.ndarray],
+    val_by_class: dict[int, np.ndarray],
     test_by_class: dict[int, np.ndarray],
+    image_size: int,
+    image_mean: list[float],
+    image_std: list[float],
     base_config,
     backbone_state: dict[str, torch.Tensor],
     expected_missing: set[str],
@@ -589,6 +610,7 @@ def train_one(
         test_images=test_images,
         test_targets=test_targets,
         train_by_class=train_by_class,
+        val_by_class=val_by_class,
         test_by_class=test_by_class,
         cifar_classes=train_base.classes,
         selected_names=selected_names,
@@ -596,10 +618,11 @@ def train_one(
         num_workers=args.num_workers,
         pin_memory=args.pin_memory,
         persistent_workers=args.persistent_workers,
-        split_seed=args.split_seed,
         random_crop=random_crop,
         random_flip=random_flip,
-        base_model=base_model,
+        image_size=image_size,
+        image_mean=image_mean,
+        image_std=image_std,
     )
 
     expected_steps = epochs * len(train_loader)
@@ -866,12 +889,17 @@ def main() -> None:
     print("Caching CIFAR100 in RAM once...")
     (
         train_images, train_targets, test_images, test_targets,
-        train_by_class, test_by_class,
-    ) = cache_cifar_in_memory(train_base, test_base)
+        train_by_class, val_by_class, test_by_class,
+    ) = cache_cifar_in_memory(train_base, test_base, args.split_seed)
     ram_mb = (train_images.numel() + test_images.numel()) / (1024 * 1024)
     print(f"CIFAR100 cache ready: {ram_mb:.1f} MiB of uint8 image tensors")
 
     base_model = ARCHITECTURES[args.architecture]
+    image_size, image_mean, image_std = processor_settings(base_model)
+    print(
+        f"Image processor cached once: size={image_size}, "
+        f"mean={image_mean}, std={image_std}"
+    )
     print(f"Loading pretrained backbone once: {base_model}")
     base_config, backbone_state, expected_missing = load_pretrained_backbone(base_model)
     print(
@@ -908,7 +936,11 @@ def main() -> None:
             test_images=test_images,
             test_targets=test_targets,
             train_by_class=train_by_class,
+            val_by_class=val_by_class,
             test_by_class=test_by_class,
+            image_size=image_size,
+            image_mean=image_mean,
+            image_std=image_std,
             base_config=base_config,
             backbone_state=backbone_state,
             expected_missing=expected_missing,
