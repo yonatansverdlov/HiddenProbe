@@ -140,3 +140,23 @@ every generated `metadata.json`.
 
 ResNet101 is also accepted by the generator as a calibration option, although
 the intended new datasets are ResNet18 and ResNet50.
+
+
+## Performance notes
+
+The generator is optimized for producing a large model zoo:
+
+- CIFAR augmentations stay at 32x32 on CPU.
+- Resize to the pretrained ResNet input size and normalization happen once per
+  batch on the GPU.
+- Validation/test are evaluated once after training by default
+  (`--eval_every 0`).
+- CUDA channels-last, TF32 and fused AdamW are enabled when available.
+- Completed outputs record a `generation_version`; older outputs are
+  automatically retrained when the generation protocol changes.
+
+To restore periodic validation, for example every two epochs:
+
+```bash
+EXTRA_ARGS="--eval_every 2" bash scripts/model_j_resnet/run_resnet18.sh
+```
