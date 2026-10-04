@@ -258,7 +258,9 @@ def make_loaders(
         raise ValueError(f"Unknown CIFAR100 classes: {missing}")
 
     class_ids = sorted(name_to_id[name] for name in selected_names)
-    label_map = {class_id: local_id for local_id, class_id in enumerate(class_ids)}
+    # Match Model-J: keep the original CIFAR100 label IDs and a 100-way head,
+    # even though only 50 classes are present in this model's training data.
+    label_map = {class_id: class_id for class_id in class_ids}
     train_idx, val_idx, test_idx = make_class_indices(
         train_base, test_base, class_ids, split_seed
     )
@@ -419,16 +421,12 @@ def train_one(
             f"our deterministic split gives {expected_steps} total steps."
         )
 
-    original_ids = sorted(label_map)
-    id2label = {
-        local_id: train_base.classes[original_id]
-        for original_id, local_id in label_map.items()
-    }
-    label2id = {name: idx for idx, name in id2label.items()}
+    id2label = {i: name for i, name in enumerate(train_base.classes)}
+    label2id = {name: i for i, name in id2label.items()}
 
     model = AutoModelForImageClassification.from_pretrained(
         base_model,
-        num_labels=N_SELECTED_CLASSES,
+        num_labels=100,
         id2label=id2label,
         label2id=label2id,
         ignore_mismatched_sizes=True,
@@ -531,6 +529,7 @@ def train_one(
         "dataset_chosen_targets": selected_names,
         "dataset_chosen_target_ids": selected_original_ids,
         "n_selected_classes": N_SELECTED_CLASSES,
+        "classifier_num_labels": 100,
         "train_per_class": TRAIN_PER_CLASS,
         "val_per_class": VAL_PER_CLASS,
         "split_seed": args.split_seed,
