@@ -522,6 +522,7 @@ def train_one(
         "source_dataset": SOURCE_DATASET,
         "source_subset": SOURCE_SUBSET,
         "source_hf_model_id": row.get("hf_model_id"),
+        "source_modelj_row": row,
         "model_idx": model_idx,
         "split": split,
         "seed": seed,
