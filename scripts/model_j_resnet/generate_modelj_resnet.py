@@ -45,7 +45,7 @@ from torchvision.transforms import (
     Resize,
     ToTensor,
 )
-from transformers import AutoImageProcessor, AutoModelForImageClassification, get_scheduler
+from transformers import AutoConfig, AutoImageProcessor, AutoModelForImageClassification, get_scheduler
 
 
 ARCHITECTURES = {
@@ -424,11 +424,13 @@ def train_one(
     id2label = {i: name for i, name in enumerate(train_base.classes)}
     label2id = {name: i for i, name in id2label.items()}
 
+    config = AutoConfig.from_pretrained(base_model)
+    config.num_labels = 100
+    config.id2label = id2label
+    config.label2id = label2id
     model = AutoModelForImageClassification.from_pretrained(
         base_model,
-        num_labels=100,
-        id2label=id2label,
-        label2id=label2id,
+        config=config,
         ignore_mismatched_sizes=True,
     )
     device = torch.device(args.device if args.device != "cuda" or torch.cuda.is_available() else "cpu")
