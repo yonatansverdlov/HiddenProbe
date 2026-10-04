@@ -60,6 +60,7 @@ SOURCE_SUBSET = "ResNet"
 TRAIN_PER_CLASS = 425
 VAL_PER_CLASS = 75
 N_SELECTED_CLASSES = 50
+GENERATION_VERSION = 2
 
 
 def parse_args() -> argparse.Namespace:
@@ -395,6 +396,7 @@ def is_complete(model_dir: Path, architecture: str, model_idx: int) -> bool:
         and data.get("architecture") == architecture
         and int(data.get("model_idx", -1)) == model_idx
         and int(data.get("classifier_num_labels", -1)) == N_SELECTED_CLASSES
+        and int(data.get("generation_version", -1)) == GENERATION_VERSION
         and "test_accuracy" in data
     )
 
@@ -636,6 +638,7 @@ def train_one(
     )
     metadata = {
         "status": "complete",
+        "generation_version": GENERATION_VERSION,
         "architecture": architecture,
         "base_model": base_model,
         "source_dataset": SOURCE_DATASET,
