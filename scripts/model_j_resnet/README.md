@@ -128,6 +128,10 @@ The split is fixed by `--split_seed` and is shared across architectures.
 This is deliberate: ResNet18 and ResNet50 see the exact same images for a
 given Model-J row.
 
+The target classifier keeps a **100-way CIFAR100 head** and original CIFAR100
+label IDs even though each model only sees 50 classes. This matches the
+parameter count and setup of the published Model-J ResNet models.
+
 Scheduler names are copied from Model-J. For scheduler variants containing
 `warmup`, the source metadata does not expose a warmup length, so this
 pipeline uses `--warmup_ratio 0.1` by default. That choice is recorded in
