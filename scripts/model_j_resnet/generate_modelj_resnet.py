@@ -86,6 +86,18 @@ def parse_args() -> argparse.Namespace:
                    help="Optional limit for smoke tests.")
     p.add_argument("--device", default="cuda")
     p.add_argument("--num_workers", type=int, default=min(8, os.cpu_count() or 1))
+    p.add_argument(
+        "--pin_memory",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use pinned host memory in DataLoaders (off by default for long-run stability).",
+    )
+    p.add_argument(
+        "--persistent_workers",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Keep DataLoader workers alive between epochs (off by default for long-run stability).",
+    )
     p.add_argument("--split_seed", type=int, default=2025,
                    help="Fixed per-class image split seed shared by every architecture.")
     p.add_argument("--warmup_ratio", type=float, default=0.1,
@@ -247,6 +259,8 @@ def make_loaders(
     selected_names: list[str],
     batch_size: int,
     num_workers: int,
+    pin_memory: bool,
+    persistent_workers: bool,
     split_seed: int,
     random_crop: bool,
     random_flip: bool,
@@ -271,8 +285,8 @@ def make_loaders(
     kwargs = {
         "batch_size": batch_size,
         "num_workers": num_workers,
-        "pin_memory": torch.cuda.is_available(),
-        "persistent_workers": num_workers > 0,
+        "pin_memory": bool(pin_memory),
+        "persistent_workers": bool(persistent_workers and num_workers > 0),
     }
     train_loader = DataLoader(
         CIFARSubset(train_base, train_idx, label_map, train_tf),
@@ -302,8 +316,8 @@ def evaluate(model, loader: DataLoader, device: torch.device) -> dict[str, float
     total_correct = 0
     total = 0
     for images, labels in loader:
-        images = images.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
+        images = images.to(device, non_blocking=bool(getattr(loader, "pin_memory", False)))
+        labels = labels.to(device, non_blocking=bool(getattr(loader, "pin_memory", False)))
         out = model(pixel_values=images, labels=labels)
         batch = labels.numel()
         total_loss += float(out.loss) * batch
@@ -400,6 +414,8 @@ def train_one(
         selected_names=selected_names,
         batch_size=batch_size,
         num_workers=args.num_workers,
+        pin_memory=args.pin_memory,
+        persistent_workers=args.persistent_workers,
         split_seed=args.split_seed,
         random_crop=random_crop,
         random_flip=random_flip,
@@ -463,8 +479,8 @@ def train_one(
         train_total = 0
 
         for images, labels in train_loader:
-            images = images.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
+            images = images.to(device, non_blocking=bool(train_loader.pin_memory))
+            labels = labels.to(device, non_blocking=bool(train_loader.pin_memory))
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(
                 device_type=device.type,
