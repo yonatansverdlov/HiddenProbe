@@ -21,4 +21,5 @@ EXTRA_ARGS="${EXTRA_ARGS:-}"
   --num_shards "$NUM_SHARDS" \
   --shard_id "$SHARD_ID" \
   --splits $SPLITS \
-  $EXTRA_ARGS
+  $EXTRA_ARGS \
+  "$@"
