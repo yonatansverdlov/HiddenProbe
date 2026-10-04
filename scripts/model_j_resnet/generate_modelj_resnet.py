@@ -21,6 +21,7 @@ The layout is intentionally simple so weight-space methods can read it directly.
 from __future__ import annotations
 
 import argparse
+import copy
 import ast
 import json
 import math
@@ -44,7 +45,7 @@ from torchvision.transforms import (
     RandomHorizontalFlip,
     ToTensor,
 )
-from transformers import AutoConfig, AutoImageProcessor, AutoModelForImageClassification, get_scheduler
+from transformers import AutoImageProcessor, AutoModelForImageClassification, get_scheduler
 
 
 ARCHITECTURES = {
@@ -427,11 +428,63 @@ def cpu_state_dict(model, dtype: torch.dtype) -> dict[str, torch.Tensor]:
     return out
 
 
+def load_pretrained_backbone(base_model: str):
+    """Load ImageNet weights once and strip the 1000-way classifier explicitly."""
+    pretrained = AutoModelForImageClassification.from_pretrained(base_model)
+    full_state = pretrained.state_dict()
+
+    classifier_keys = sorted(k for k in full_state if k.startswith("classifier."))
+    expected_classifier_keys = ["classifier.1.bias", "classifier.1.weight"]
+    if classifier_keys != expected_classifier_keys:
+        raise RuntimeError(
+            "Unexpected pretrained classifier structure. "
+            f"Expected {expected_classifier_keys}, got {classifier_keys}"
+        )
+
+    backbone_state = {
+        key: value.detach().cpu().clone()
+        for key, value in full_state.items()
+        if not key.startswith("classifier.")
+    }
+    base_config = copy.deepcopy(pretrained.config)
+    del pretrained
+    return base_config, backbone_state, set(expected_classifier_keys)
+
+
+def build_target_model(
+    base_config,
+    backbone_state: dict[str, torch.Tensor],
+    expected_missing: set[str],
+    id2label: dict[int, str],
+    label2id: dict[str, int],
+):
+    """Create a fresh 50-way model and strictly initialize only its backbone."""
+    config = copy.deepcopy(base_config)
+    config.num_labels = N_SELECTED_CLASSES
+    config.id2label = id2label
+    config.label2id = label2id
+
+    model = AutoModelForImageClassification.from_config(config)
+    load_result = model.load_state_dict(backbone_state, strict=False)
+
+    missing = set(load_result.missing_keys)
+    unexpected = set(load_result.unexpected_keys)
+    if missing != expected_missing or unexpected:
+        raise RuntimeError(
+            "Backbone initialization mismatch: "
+            f"missing={sorted(missing)}, unexpected={sorted(unexpected)}"
+        )
+    return model
+
+
 def train_one(
     row: dict[str, Any],
     args: argparse.Namespace,
     train_base: CIFAR100,
     test_base: CIFAR100,
+    base_config,
+    backbone_state: dict[str, torch.Tensor],
+    expected_missing: set[str],
     position: int,
     total_positions: int,
 ) -> None:
@@ -502,14 +555,12 @@ def train_one(
     }
     label2id = {name: idx for idx, name in id2label.items()}
 
-    config = AutoConfig.from_pretrained(base_model)
-    config.num_labels = N_SELECTED_CLASSES
-    config.id2label = id2label
-    config.label2id = label2id
-    model = AutoModelForImageClassification.from_pretrained(
-        base_model,
-        config=config,
-        ignore_mismatched_sizes=True,
+    model = build_target_model(
+        base_config=base_config,
+        backbone_state=backbone_state,
+        expected_missing=expected_missing,
+        id2label=id2label,
+        label2id=label2id,
     )
     device = torch.device(args.device if args.device != "cuda" or torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -721,12 +772,23 @@ def main() -> None:
     train_base = CIFAR100(root=args.cifar_root, train=True, download=True)
     test_base = CIFAR100(root=args.cifar_root, train=False, download=True)
 
+    base_model = ARCHITECTURES[args.architecture]
+    print(f"Loading pretrained backbone once: {base_model}")
+    base_config, backbone_state, expected_missing = load_pretrained_backbone(base_model)
+    print(
+        f"Pretrained backbone ready: {len(backbone_state)} tensors; "
+        f"fresh head={sorted(expected_missing)}"
+    )
+
     for position, row in enumerate(rows, start=1):
         train_one(
             row=row,
             args=args,
             train_base=train_base,
             test_base=test_base,
+            base_config=base_config,
+            backbone_state=backbone_state,
+            expected_missing=expected_missing,
             position=position,
             total_positions=len(rows),
         )
