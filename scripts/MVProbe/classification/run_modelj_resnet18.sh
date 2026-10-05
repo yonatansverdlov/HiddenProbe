@@ -10,8 +10,8 @@ set -euo pipefail
 #   lr=3e-4, weight_decay=1e-5, batch_size=128
 #   epochs=3000, validation every 25 epochs
 #
-# We select the ResNet18 layer using validation only, then evaluate the selected
-# layer over seeds 1..5.
+# We select the ResNet18 layer using validation only.
+# Test is never evaluated during this sweep.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
@@ -34,11 +34,8 @@ EVAL_EVERY="${EVAL_EVERY:-25}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 
 SWEEP_SEED="${SWEEP_SEED:-1}"
-FINAL_SEEDS="${FINAL_SEEDS:-1 2 3 4 5}"
-
 SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_modelj_resnet18_layer_sweep_s${SWEEP_SEED}"
-FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_modelj_resnet18_best_layer"
-mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
+mkdir -p "$SWEEP_ROOT"
 
 [[ -d "$DATA_ROOT/$ARCH/train" ]] || { echo "Missing $DATA_ROOT/$ARCH/train" >&2; exit 2; }
 
@@ -157,62 +154,7 @@ for k, v in rows[0].items():
 print(f"Ranked results: {root / 'layer_results.csv'}")
 PY
 
-BEST_LAYER="$("$PYTHON" - "$SWEEP_ROOT/selected_layer.json" <<'PY'
-import json, sys
-print(json.load(open(sys.argv[1]))["layer_index"])
-PY
-)"
-
 echo
-echo "========== FINAL MVProbe | ResNet18 | layer=$BEST_LAYER | seeds=$FINAL_SEEDS =========="
-
-SUMMARIES=()
-for SEED in $FINAL_SEEDS; do
-  NAME="mvprobe_modelj_resnet18_L${BEST_LAYER}_s${SEED}"
-  DIR="$FINAL_ROOT/$NAME"
-  SUMMARIES+=("$DIR/summary.json")
-
-  if is_complete_summary "$DIR/summary.json" "final_test_acc"; then
-    echo "Seed $SEED already completed: $NAME"
-    continue
-  fi
-
-  "$PYTHON" models/modelj_probe_trainer.py \
-    --model_variant mvprobe \
-    --root "$DATA_ROOT" \
-    --architecture "$ARCH" \
-    --layer_index "$BEST_LAYER" \
-    --n_probes "$N_PROBES" \
-    --proj_dim "$PROJ_DIM" \
-    --rep_dim "$REP_DIM" \
-    --lr "$LR" \
-    --weight_decay "$WEIGHT_DECAY" \
-    --batch_size "$BATCH_SIZE" \
-    --epochs "$EPOCHS" \
-    --eval_every "$EVAL_EVERY" \
-    --seed "$SEED" \
-    --num_workers "$NUM_WORKERS" \
-    --device "$DEVICE" \
-    --out_dir "$DIR"
-done
-
-"$PYTHON" - "$SWEEP_ROOT/selected_layer.json" "${SUMMARIES[@]}" <<'PY'
-import json
-import sys
-
-from models.logging_utils import print_final_summary
-
-selected = json.load(open(sys.argv[1]))
-values = [float(json.load(open(p))["final_test_acc"]) for p in sys.argv[2:]]
-
-print(
-    f"Selected layer: {selected['layer_index']} "
-    f"{selected['layer_name']} X={selected['matrix_shape']}"
-)
-print_final_summary(
-    method="MVProbe",
-    task="classification",
-    dataset="Model-J CIFAR100 / ResNet18",
-    values=values,
-)
-PY
+echo "Layer sweep complete."
+echo "Ranked validation results: $SWEEP_ROOT/layer_results.csv"
+echo "Selected layer: $SWEEP_ROOT/selected_layer.json"
