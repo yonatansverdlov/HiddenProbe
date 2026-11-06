@@ -147,6 +147,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", required=True)
     ap.add_argument("--model_variant", choices=["mvprobe", "probex"], default="mvprobe")
+    ap.add_argument("--dataset_name", default="SVHN", help="Human-readable model-zoo name")
     ap.add_argument("--split_csv", default="split.csv")
     ap.add_argument("--layer_index", type=int, required=True)
     ap.add_argument("--n_probes", type=int, default=128)
@@ -215,7 +216,7 @@ def main():
     print_run_config(
         method=("MVProbe" if args.model_variant == "mvprobe" else "ProbeX"),
         task="regression",
-        dataset=f"SVHN / layer {args.layer_index}",
+        dataset=f"{args.dataset_name} / layer {args.layer_index}",
         seed=args.seed,
         experiment=Path(args.out_dir).name,
         train_size=len(train_ds),
@@ -286,7 +287,7 @@ def main():
     summary = {
         "method": ("MVProbe" if args.model_variant == "mvprobe" else "ProbeX"),
         "model_variant": args.model_variant,
-        "dataset": "SVHN",
+        "dataset": args.dataset_name,
         "seed": args.seed,
         "layer_index": args.layer_index,
         "layer_name": train_ds.layer_name,
