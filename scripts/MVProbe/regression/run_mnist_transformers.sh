@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Stage 1 (seed 0, validation only):
 #   6 selected transformer weight matrices x 2 n_probes x 2 proj_dim x 3 learning rates
-#   x 2 batch sizes x 3 weight decays x 4 plateau factors = 864 configs.
+#   x 2 batch sizes x 3 weight decays x 4 plateau factors = 1728 configs.
 #   60 epochs each by default; the held-out test split is never instantiated or evaluated.
 #   Scheduler: ReduceLROnPlateau on validation metric.
 #
@@ -82,6 +82,7 @@ for LAYER in 0 1 2 3 4 5; do
               continue
             fi
             "$PYTHON" models/mvprobe_transformer_trainer.py \
+              --model_variant mvprobe \
               --data_dir "$DATA_DIR" \
               --layer_index "$LAYER" \
               --n_probes "$N_PROBES" \
@@ -184,6 +185,7 @@ for SEED in 0 1 2 3 4; do
     continue
   fi
   "$PYTHON" models/mvprobe_transformer_trainer.py \
+    --model_variant mvprobe \
     --data_dir "$DATA_DIR" \
     --layer_index "$BEST_LAYER" \
     --n_probes "$BEST_Q" \
