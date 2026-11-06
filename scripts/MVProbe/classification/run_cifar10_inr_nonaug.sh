@@ -66,6 +66,7 @@ for LAYER in 0 1; do
               continue
             fi
             "$PYTHON" models/mvprobe_inr_trainer.py \
+              --model_variant mvprobe \
               --data_dir "$DATA_DIR" \
               --split_json "$SPLIT" \
               --dataset_name "CIFAR-10 INR non-aug" \
@@ -172,6 +173,7 @@ for SEED in 0 1 2 3 4; do
     continue
   fi
   "$PYTHON" models/mvprobe_inr_trainer.py \
+    --model_variant mvprobe \
     --data_dir "$DATA_DIR" \
     --split_json "$SPLIT" \
     --dataset_name "CIFAR-10 INR non-aug" \
