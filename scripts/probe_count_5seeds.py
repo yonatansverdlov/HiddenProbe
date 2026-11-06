@@ -300,6 +300,74 @@ def export(dataset: str, probes: list[int], seeds: list[int], methods: list[str]
           f"complete; {len(summary)} fully aggregated groups. Files: {out_root}", flush=True)
 
 
+def run_parallel_probes(args, out_root: Path, base_env: dict[str, str]) -> None:
+    """One worker per GPU; each worker runs all seeds/methods for its Q sequentially.
+
+    No concurrent CSV writes: workers write per-run JSON only, and this parent
+    writes all aggregate CSVs once the workers have exited.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    import torch
+
+    available = torch.cuda.device_count()
+    gpus = args.gpus if args.gpus is not None else list(range(available))
+    if not gpus:
+        raise RuntimeError("No visible CUDA GPUs. Request GPUs from the scheduler first.")
+    if len(set(gpus)) != len(gpus) or any(g < 0 or g >= available for g in gpus):
+        raise RuntimeError(
+            f"GPU indices must be distinct values from 0 to {available - 1}; got {gpus}. "
+            "Indices are relative to CUDA_VISIBLE_DEVICES."
+        )
+    assignments = {g: [] for g in gpus}
+    for idx, q in enumerate(args.probes):
+        assignments[gpus[idx % len(gpus)]].append(q)
+    print(f"[parallel] GPU allocation: {assignments}", flush=True)
+    if len(gpus) < len(args.probes):
+        print("[parallel] Fewer GPUs than probe counts; extra Q jobs will queue "
+              "on the existing GPUs instead of sharing GPU memory.", flush=True)
+
+    def worker(gpu: int, counts: list[int]) -> None:
+        worker_env = dict(base_env)
+        worker_env["CUDA_VISIBLE_DEVICES"] = str(gpu)
+        for q in counts:
+            # Re-enter this launcher with a single Q. It will train all 5 seeds
+            # for both models sequentially; disable its aggregate CSV writes.
+            cmd = [
+                sys.executable, str(ROOT / "scripts" / "probe_count_5seeds.py"),
+                "--dataset", args.dataset,
+                "--probes", str(q),
+                "--seeds", *(str(z) for z in args.seeds),
+                "--methods", *args.methods,
+                "--out-root", args.out_root,
+                "--eval-batch-size", str(args.eval_batch_size),
+                "--skip-setup", "--no-export",
+            ]
+            if args.max_runs:
+                cmd += ["--max-runs", str(args.max_runs)]
+            print(f"[parallel] GPU {gpu}: starting Q={q}", flush=True)
+            run_command(
+                cmd, out_root / "logs" / f"parallel_Q{q}_gpu{gpu}.log",
+                worker_env,
+            )
+            print(f"[parallel] GPU {gpu}: completed Q={q}", flush=True)
+
+    problems = []
+    try:
+        with ThreadPoolExecutor(max_workers=len(assignments)) as pool:
+            jobs = {pool.submit(worker, gpu, counts): gpu for gpu, counts in assignments.items() if counts}
+            for job, gpu in jobs.items():
+                try:
+                    job.result()
+                except Exception as exc:
+                    problems.append((gpu, str(exc)))
+    finally:
+        # Export every completed seed even if another GPU worker failed.
+        export(args.dataset, args.probes, args.seeds, args.methods, out_root)
+    if problems:
+        raise RuntimeError("Parallel worker failures:\n" +
+                           "\n".join(f"GPU {gpu}: {issue}" for gpu, issue in problems))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset", choices=DATASETS, required=True)
@@ -308,6 +376,11 @@ def main() -> None:
     p.add_argument("--methods", nargs="+", choices=METHODS, default=list(METHODS))
     p.add_argument("--out-root", default="checkpoints/probe_count_5seeds")
     p.add_argument("--skip-setup", action="store_true")
+    p.add_argument("--parallel-probes", action="store_true",
+                   help="Run independent probe counts simultaneously, one per GPU")
+    p.add_argument("--gpus", nargs="+", type=int, default=None,
+                   help="Visible CUDA GPU indices to use (default: all available)")
+    p.add_argument("--no-export", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--max-runs", type=int, default=0,
                    help="Run at most this many missing seeds (smoke test: 1); 0=all")
@@ -326,6 +399,10 @@ def main() -> None:
             p.error(f"MNIST channel-trajectory supports only {DEFAULT_PROBES}, got {sorted(bad)}")
     if a.eval_batch_size < 1:
         p.error("--eval-batch-size must be >= 1")
+    if a.gpus is not None and not a.parallel_probes:
+        p.error("--gpus requires --parallel-probes")
+    if a.no_export and a.parallel_probes:
+        p.error("--no-export cannot be combined with --parallel-probes")
 
     out_root = (ROOT / a.out_root / a.dataset).resolve()
     env = dict(os.environ)
@@ -362,8 +439,22 @@ def main() -> None:
     if not torch.cuda.is_available():
         raise RuntimeError("GPU not available. Run this experiment inside a CUDA/Slurm job.")
     print(f"[probe-count] Device: {torch.cuda.get_device_name()}", flush=True)
-    print("[probe-count] TEST is evaluated only with the validation-selected best checkpoint. "
-          "Runs execute sequentially to avoid GPU memory/timing interference.", flush=True)
+    if a.parallel_probes:
+        if todo and not a.skip_setup:
+            prepare(a.dataset, env)
+        pending_q = {q for _, q, _, _, _ in todo}
+        if pending_q:
+            # Avoid spawning subprocesses for Qs whose all runs are complete.
+            original_q = a.probes
+            a.probes = [q for q in original_q if q in pending_q]
+            try:
+                run_parallel_probes(a, out_root, env)
+            finally:
+                a.probes = original_q
+        else:
+            export(a.dataset, a.probes, a.seeds, a.methods, out_root)
+        return
+    print("[probe-count] Sequential training; use --parallel-probes for one Q per GPU.", flush=True)
     if todo and not a.skip_setup:
         prepare(a.dataset, env)
 
@@ -376,9 +467,11 @@ def main() -> None:
         if not (run_dir / "probe_count_eval.json").exists():
             raise RuntimeError(f"Trainer did not create benchmark JSON: {run_dir}")
         done_now += 1
-        export(a.dataset, a.probes, a.seeds, a.methods, out_root)
+        if not a.no_export:
+            export(a.dataset, a.probes, a.seeds, a.methods, out_root)
 
-    export(a.dataset, a.probes, a.seeds, a.methods, out_root)
+    if not a.no_export:
+        export(a.dataset, a.probes, a.seeds, a.methods, out_root)
 
 
 if __name__ == "__main__":
