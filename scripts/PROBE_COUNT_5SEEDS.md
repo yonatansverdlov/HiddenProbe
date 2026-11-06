@@ -85,6 +85,11 @@ avoid other GPU jobs and repeat timing if results are noisy.
 - `checkpoints/probe_count_5seeds/<dataset>/summary.csv`: **mean, sample SD
   and SEM** for each metric and each (method, N), written only after all
   requested seeds finish.
+- `checkpoints/probe_count_5seeds/<dataset>/comparison.csv`: paired
+  HiddenProbe minus ProbeGen test metric, ProbeGen/HiddenProbe evaluation
+  speedup (greater than 1 means HiddenProbe is faster), and
+  HiddenProbe/ProbeGen absolute GPU memory ratio. Interpret the memory
+  ratio cautiously because the two backends retain different data tensors.
 - `checkpoints/probe_count_5seeds/<dataset>/logs/*.log`: stdout/stderr of
   each run.
 - Each trainer's `probe_count_eval.json`: machine-readable benchmark data.
