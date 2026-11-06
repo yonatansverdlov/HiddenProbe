@@ -80,6 +80,7 @@ for LAYER in 0 1 2; do
               continue
             fi
             "$PYTHON" models/mvprobe_svhn_trainer.py \
+              --model_variant mvprobe \
               --dataset_name MNIST \
     --data_dir "$DATA_DIR" \
               --split_csv "$SPLIT" \
@@ -184,6 +185,7 @@ for SEED in 0 1 2 3 4; do
     continue
   fi
   "$PYTHON" models/mvprobe_svhn_trainer.py \
+    --model_variant mvprobe \
     --dataset_name MNIST \
     --data_dir "$DATA_DIR" \
     --split_csv "$SPLIT" \
