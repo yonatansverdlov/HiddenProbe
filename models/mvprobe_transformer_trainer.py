@@ -33,6 +33,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from data import make_split
 from models.logging_utils import print_eval, print_run_config, print_seed_result
+from models.progress import show_progress
 from models.metrics_cnn import kendall_tau_b
 from models.mvprobe import ProbeXRegression as MVProbeRegression
 from models.probex import ProbeXRegression as OriginalProbeXRegression
@@ -93,9 +94,13 @@ class TransformerWeightLayerDataset(Dataset):
                     "'python main.py transformer cache --dataset mnist --seed 0 "
                     "--cut_off 0 --data_root data' first."
                 )
-            self.matrices = torch.stack(
-                [item["params"][self.layer_name].detach().float().cpu() for item in zoo]
-            )
+            layer_label = f"Transformer weight cache ({split}, layer {self.layer_index})"
+            show_progress(layer_label, 0, len(zoo))
+            matrices = []
+            for i, item in enumerate(zoo, 1):
+                matrices.append(item["params"][self.layer_name].detach().float().cpu())
+                show_progress(layer_label, i, len(zoo))
+            self.matrices = torch.stack(matrices)
             self.targets = torch.tensor(
                 [float(item["label"]) for item in zoo], dtype=torch.float32
             )
