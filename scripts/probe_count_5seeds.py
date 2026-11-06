@@ -211,7 +211,8 @@ def export(dataset: str, probes: list[int], seeds: list[int], methods: list[str]
             "dataset", "method", "n_probes", "seed", "test_metric_name", "test_metric",
             "eval_n_examples", "eval_time_sec", "eval_examples_per_sec",
             "eval_gpu_baseline_mb", "eval_peak_gpu_mb", "eval_incremental_gpu_mb",
-            "train_time_sec", "trainable_params",
+            "train_time_sec", "trainable_params", "gpu_name",
+            "torch_version", "eval_batch_size", "eval_memory_definition",
         ]
         with (out_root / "per_seed.csv").open("w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
