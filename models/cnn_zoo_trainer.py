@@ -527,6 +527,11 @@ if args.skip_test_eval:
 else:
     # TEST IS TOUCHED EXACTLY ONCE in the normal training protocol.
     if os.environ.get("PROBE_COUNT_PROFILE") == "1":
+        # The saved best configs use different training/validation batch sizes.
+        # Benchmark TEST for both SVHN methods with the same batch size (64).
+        args.eval_cnn_bs = int(os.environ.get("PROBE_COUNT_EVAL_BS", "64"))
+        if args.eval_cnn_bs < 1:
+            raise ValueError("PROBE_COUNT_EVAL_BS must be >= 1")
         # Training is finished. Free Adam moments for a cleaner inference baseline.
         opt.state.clear()
         (ft, test_pred), eval_profile = timed_eval(
