@@ -58,8 +58,35 @@ if count == 0:
     local count
     count="$(wc -l < "$selected")"
     log "Extracting $count original .pth checkpoints only (no augmentation)."
+    # GNU tar -v prints one extracted filename per line to stdout.
+    # Consume it as a progress counter instead of flooding the terminal.
     local status=0
-    tar -xf "$archive" -C "$dest" -T "$selected" || status=$?
+    tar -xvf "$archive" -C "$dest" -T "$selected" | awk -v total="$count" '
+        BEGIN {
+            width = 40
+            done = 0
+            last_pct = -1
+            printf "[setup] CIFAR-10 INR extraction: 0%% (0/%d)\n", total > "/dev/stderr"
+        }
+        {
+            done++
+            pct = int(100 * done / total)
+            if (pct > 100) pct = 100
+            if (pct != last_pct) {
+                filled = int(width * pct / 100)
+                bar = ""
+                for (i = 0; i < filled; i++) bar = bar "#"
+                for (i = filled; i < width; i++) bar = bar "-"
+                printf "\r[setup] CIFAR-10 INR extraction: [%s] %3d%% (%d/%d)", bar, pct, done, total > "/dev/stderr"
+                fflush("/dev/stderr")
+                last_pct = pct
+            }
+        }
+        END {
+            printf "\n" > "/dev/stderr"
+            fflush("/dev/stderr")
+        }
+    ' || status=$?
     rm -f "$selected"
     return "$status"
 }
