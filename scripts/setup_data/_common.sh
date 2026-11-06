@@ -150,6 +150,50 @@ extract_tar_xz_with_progress() {
 
     require_cmd tar
 
+    # CNN Zoo archives may contain a single huge weights.npy: number-of-files
+    # progress can appear frozen. Track decompressed bytes instead.
+    local py="${PYTHON:-python}"
+    local total_bytes=""
+    if command -v xz >/dev/null 2>&1 && command -v "$py" >/dev/null 2>&1; then
+        total_bytes="$(xz --robot --list "$archive" 2>/dev/null | awk -F '\t' '$1=="totals" {print $5}' | tail -n 1)"
+    fi
+    if [[ "$total_bytes" =~ ^[0-9]+$ ]] && (( total_bytes > 0 )); then
+        log "$label: ${total_bytes} uncompressed bytes"
+        xz -dc "$archive" \
+            | "$py" -c '
+import sys
+total = int(sys.argv[1])
+label = sys.argv[2]
+stream_in = sys.stdin.buffer
+stream_out = sys.stdout.buffer
+done = 0
+last_pct = -1
+try:
+    while True:
+        chunk = stream_in.read(4 * 1024 * 1024)
+        if not chunk:
+            break
+        stream_out.write(chunk)
+        stream_out.flush()
+        done += len(chunk)
+        pct = min(100, int(100 * done / total))
+        if pct != last_pct:
+            filled = int(40 * pct / 100)
+            bar = "#" * filled + "-" * (40 - filled)
+            print(
+                f"\r[setup] {label}: [{bar}] {pct:3d}% "
+                f"({done:,}/{total:,} bytes)",
+                end="", file=sys.stderr, flush=True,
+            )
+            last_pct = pct
+finally:
+    print(file=sys.stderr, flush=True)
+' "$total_bytes" "$label" \
+            | tar -xf - -C "$dest"
+        return
+    fi
+
+    # Fallback when byte-size metadata or Python is unavailable.
     local total
     total="$(tar -tJf "$archive" 2>/dev/null | wc -l | tr -d '[:space:]')"
 
