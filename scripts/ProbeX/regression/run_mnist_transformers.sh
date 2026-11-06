@@ -84,7 +84,6 @@ for LAYER in 0 1 2 3 4 5; do
             "$PYTHON" models/mvprobe_transformer_trainer.py \
               --model_variant probex \
               --data_dir "$DATA_DIR" \
-              
               --layer_index "$LAYER" \
               --n_probes "$N_PROBES" \
               --proj_dim "$PROJ_DIM" \
@@ -188,7 +187,6 @@ for SEED in 0 1 2 3 4; do
   "$PYTHON" models/mvprobe_transformer_trainer.py \
     --model_variant probex \
     --data_dir "$DATA_DIR" \
-    
     --layer_index "$BEST_LAYER" \
     --n_probes "$BEST_Q" \
     --proj_dim "$BEST_PROJ" \
