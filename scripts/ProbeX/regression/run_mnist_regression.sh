@@ -79,7 +79,7 @@ for LAYER in 0 1 2; do
               echo "Skipping."
               continue
             fi
-            "$PYTHON" models/mvprobe_mnist_regression_trainer.py \
+            "$PYTHON" models/mvprobe_svhn_trainer.py \
               --model_variant probex \
                --dataset_name MNIST \
               --data_dir "$DATA_DIR" \
@@ -184,7 +184,7 @@ for SEED in 0 1 2 3 4; do
     echo "Skipping."
     continue
   fi
-  "$PYTHON" models/mvprobe_mnist_regression_trainer.py \
+  "$PYTHON" models/mvprobe_svhn_trainer.py \
     --model_variant probex \
                --dataset_name MNIST \
     --data_dir "$DATA_DIR" \
