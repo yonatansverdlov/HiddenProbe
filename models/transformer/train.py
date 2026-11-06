@@ -488,6 +488,7 @@ def cmd_train(a):
             lambda: run_eval(sys_, te, norm, micro=max(32, a.micro)),
             n_examples=len(te), device=dev,
         )
+        eval_profile["eval_batch_size"] = max(32, a.micro)
         save_benchmark(
             runs, method=a.method, dataset="mnist_transformer",
             seed=a.seed, n_probes=a.n_probes,
