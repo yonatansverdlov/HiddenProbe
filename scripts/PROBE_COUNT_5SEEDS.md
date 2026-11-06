@@ -72,11 +72,10 @@ run evaluation in isolated processes with identical batch-level target
 materialization.
 
 FMNIST training batch sizes differ between saved best configs (64 for
-HiddenProbe, 32 for ProbeGen); **final TEST evaluation uses batch size 32 for
-both**. SVHN HiddenProbe has a saved evaluation batch size of 256, while
-ProbeGen core uses its training batch size (64); those end-to-end timing
-measurements should be labeled accordingly. Transformer test evaluation uses
-batch size 32 for both. For meaningful runtime comparisons, use the same GPU,
+HiddenProbe, 32 for ProbeGen), but **final TEST evaluation uses batch size 32
+for both**. SVHN retains its saved training/validation batch sizes, but **final
+TEST evaluation uses batch size 64 for both** (instead of HiddenProbe\'s
+original 256). Transformer test evaluation uses batch size 32 for both. For meaningful runtime comparisons, use the same GPU,
 avoid other GPU jobs and repeat timing if results are noisy.
 
 ## Outputs
