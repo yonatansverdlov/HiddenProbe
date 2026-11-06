@@ -80,6 +80,7 @@ for LAYER in 0 1 2; do
               continue
             fi
             "$PYTHON" models/mvprobe_svhn_trainer.py \
+              --model_variant mvprobe \
               --data_dir "$DATA_DIR" \
               --split_csv "$SPLIT" \
               --layer_index "$LAYER" \
@@ -183,6 +184,7 @@ for SEED in 0 1 2 3 4; do
     continue
   fi
   "$PYTHON" models/mvprobe_svhn_trainer.py \
+    --model_variant mvprobe \
     --data_dir "$DATA_DIR" \
     --split_csv "$SPLIT" \
     --layer_index "$BEST_LAYER" \
