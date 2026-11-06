@@ -18,6 +18,7 @@ from models.transformer.system import LearnedSystem, TPConfig, PARAM_CEILING, fi
 from models.transformer.readout_channeltraj import CT_FFN                # channel_trajectory v1: fixed FFN (no auto-fit)
 from models.transformer.acquire import predict
 from models.logging_utils import print_run_config, print_eval, print_seed_result
+from models.eval_benchmark import timed_eval, save_benchmark
 try:
     from scipy.stats import kendalltau, spearmanr
 except Exception:
@@ -472,6 +473,7 @@ def cmd_train(a):
         resume = torch.load(a.resume_state, map_location="cpu", weights_only=False)
         _check_resume_compat(resume.get("meta") or {}, meta); resume["path"] = a.resume_state
     state_path = os.path.join(runs, "training_state.pt") if a.save_state_every > 0 else None
+    train_started_for_benchmark = time.perf_counter()
     norm, hist, best, best_state, best_step, best_epoch = train_loop(sys_, tr, va, a.max_updates, eval_every=a.eval_every, micro=a.micro,
                                   eff=eff, gen_lr=a.gen_lr, pred_lr=a.pred_lr,
                                   scheduler=a.scheduler, patience=a.plateau_patience, factor=a.plateau_factor,
@@ -480,7 +482,21 @@ def cmd_train(a):
                                   exact_accum=a.exact_accum, state_every=a.save_state_every, state_path=state_path,
                                   resume=resume, meta=meta, profile=a.profile, stop_after=a.stop_after)
     sys_.load_state_dict(best_state)
-    test_metrics, _ = run_eval(sys_, te, norm, micro=max(32, a.micro))
+    train_time_sec = time.perf_counter() - train_started_for_benchmark
+    if os.environ.get("PROBE_COUNT_PROFILE") == "1":
+        (test_metrics, _), eval_profile = timed_eval(
+            lambda: run_eval(sys_, te, norm, micro=max(32, a.micro)),
+            n_examples=len(te), device=dev,
+        )
+        save_benchmark(
+            runs, method=a.method, dataset="mnist_transformer",
+            seed=a.seed, n_probes=a.n_probes,
+            metric_name="test_tau", metric=test_metrics["kendall_tau"],
+            train_time_sec=train_time_sec, trainable_params=sys_.n_trainable(),
+            profile=eval_profile,
+        )
+    else:
+        test_metrics, _ = run_eval(sys_, te, norm, micro=max(32, a.micro))
     print_seed_result(
         task="regression", seed=a.seed, best_epoch=best_epoch, best_step=best_step,
         val_value=best, test_value=test_metrics["kendall_tau"],
