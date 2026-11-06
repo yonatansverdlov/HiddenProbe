@@ -17,6 +17,7 @@ from scipy.stats import kendalltau
 
 from models.probegen_core import ProbeGen
 from models.logging_utils import print_run_config, print_eval, print_seed_result, print_final_summary
+from models.eval_benchmark import timed_eval, save_benchmark
 from data_probegen import CIFAR10INRDataset, INRDataset, CachedCNNParkDataset
 
 
@@ -1308,7 +1309,25 @@ def run_one_seed(args, seed, exp_dir):
     model.load_state_dict(ckpt["model_state_dict"])
 
     best_val_results = evaluate(val_loader)
-    best_test_results = evaluate(test_loader)
+    probe_count_profile = os.environ.get("PROBE_COUNT_PROFILE") == "1"
+    train_time_sec = time.time() - train_started
+    if probe_count_profile:
+        # Training is finished; don't include Adam moments in the evaluation baseline.
+        optimizer.state.clear()
+        (best_test_results, eval_profile) = timed_eval(
+            lambda: evaluate(test_loader), n_examples=len(test_set), device=device
+        )
+        save_benchmark(
+            exp_dir,
+            method=args.method, dataset=args.dataset, seed=seed,
+            n_probes=args.n_probes,
+            metric_name="test_tau" if task == "regression" else "test_acc",
+            metric=best_test_results["tau"] if task == "regression" else best_test_results["acc"],
+            train_time_sec=train_time_sec, trainable_params=trainable_params,
+            profile=eval_profile,
+        )
+    else:
+        best_test_results = evaluate(test_loader)
 
     predictions = pd.DataFrame(
         {
