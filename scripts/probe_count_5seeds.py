@@ -295,7 +295,7 @@ def main() -> None:
     out_root = (ROOT / a.out_root / a.dataset).resolve()
     env = dict(os.environ)
     env["PROBE_COUNT_PROFILE"] = "1"
-    env["PROBE_COUNT_EVAL_BS"] = str(a.eval_batch_size)
+    env["PROBE_COUNT_EVAL_BS"] = str(64 if a.dataset == "svhn" else a.eval_batch_size)
     env["PYTHONUNBUFFERED"] = "1"
     env["DATA_ROOT"] = str(ROOT / "data")
 
