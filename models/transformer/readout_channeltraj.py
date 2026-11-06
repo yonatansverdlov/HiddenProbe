@@ -1,4 +1,4 @@
-"""Channel-trajectory readout — arch 'channel_trajectory' (version 1). Q=256, FFN fixed 384.
+"""Channel-trajectory readout — arch 'channel_trajectory' (version 1). MNIST Q=16..256, FFN fixed 384.
 
 Hypothesis under test: encode each hidden CHANNEL's responses across the COMPLETE probe bank (one long
 "trajectory" per channel per view), instead of summarizing each probe separately (R2's per-probe local
@@ -85,6 +85,12 @@ def geometry_for(n_probes: int, n_classes: int, route_lens) -> CTGeometry:
     for g in CT_GEOMETRIES.values():
         if g.n_probes == n_probes and g.n_classes == n_classes and g.route_lens == rl:
             return g
+    # Figure-3 probe-count ablation: same two MNIST acquisition routes (3:1),
+    # same channel-trajectory encoder, but variable input trajectory length.
+    # Q=256 still resolves to the unchanged canonical geometry above.
+    if n_probes in (16, 32, 64, 128) and n_classes == 10 and rl == [17, 49]:
+        n_native = n_probes // 4
+        return CTGeometry("mnist", ((n_probes - n_native, 17), (n_native, 49)), 10)
     sup = [(g.name, g.n_probes, g.n_classes, g.route_lens) for g in CT_GEOMETRIES.values()]
     raise ValueError(f"channel_trajectory supports only {sup}; got n_probes={n_probes}, n_classes={n_classes}, route_lens={rl}")
 
@@ -99,7 +105,7 @@ CT_ROUTE_LENS = _MN.route_lens                          # [17, 49]
 
 
 class CTContractError(ValueError):
-    """Raised when the response contract is not the fixed Q256 geometry this readout requires."""
+    """Raised when the response contract disagrees with the configured geometry."""
 
 
 def _logical_view(x: torch.Tensor, mask, L: int, what: str) -> torch.Tensor:
