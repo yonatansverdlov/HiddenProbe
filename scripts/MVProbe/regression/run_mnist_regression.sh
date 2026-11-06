@@ -79,8 +79,9 @@ for LAYER in 0 1 2; do
               echo "Skipping."
               continue
             fi
-            "$PYTHON" models/mvprobe_mnist_regression_trainer.py \
-              --data_dir "$DATA_DIR" \
+            "$PYTHON" models/mvprobe_svhn_trainer.py \
+              --dataset_name MNIST \
+    --data_dir "$DATA_DIR" \
               --split_csv "$SPLIT" \
               --layer_index "$LAYER" \
               --n_probes "$N_PROBES" \
@@ -182,7 +183,8 @@ for SEED in 0 1 2 3 4; do
     echo "Skipping."
     continue
   fi
-  "$PYTHON" models/mvprobe_mnist_regression_trainer.py \
+  "$PYTHON" models/mvprobe_svhn_trainer.py \
+    --dataset_name MNIST \
     --data_dir "$DATA_DIR" \
     --split_csv "$SPLIT" \
     --layer_index "$BEST_LAYER" \
