@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Time one real sweep configuration per benchmark and baseline, without downloads.
 
-Example (five datasets concurrently, ProbeX first then MVProbe):
-    python scripts/benchmark_weight_probes.py --parallel 5 --epochs 60
+Example (FMNIST-INR only, ProbeX and MVProbe simultaneously):
+    python scripts/benchmark_weight_probes.py --datasets fmnist_inr --parallel 2 --epochs 60
 
 This script never calls the data download scripts and never starts a full sweep.
 It creates the MNIST-Transformers *local cache* from already downloaded checkpoints
@@ -40,7 +40,7 @@ def secs_hms(s: str) -> float:
     return float(h * 3600 + m * 60 + sec)
 
 
-def check_local_data(root: Path) -> None:
+def check_local_data(root: Path, datasets: set[str]) -> None:
     required = {
         "svhn": [
             root / "regression/svhn/weights.npy",
@@ -57,7 +57,8 @@ def check_local_data(root: Path) -> None:
         "fmnist": [root / "classification/fmnist_inr/fmnist_splits.json"],
         "cifar10": [root / "classification/cifar10_inr/nfn_cifar_split_noaug.json"],
     }
-    missing = [str(p) for items in required.values() for p in items if not p.is_file()]
+    missing = [str(p) for name, items in required.items() if name in datasets
+               for p in items if not p.is_file()]
     if missing:
         raise FileNotFoundError(
             "Dataset files are missing; no downloads will be attempted:\n  "
@@ -186,7 +187,11 @@ def main() -> int:
     parser.add_argument("--methods", nargs="+", choices=("probex", "mvprobe"),
                         default=("probex", "mvprobe"))
     parser.add_argument("--parallel", type=int, default=5,
-                        help="Number of concurrent benchmarks (default 5)")
+                        help="Maximum concurrent independent training processes")
+    parser.add_argument("--datasets", nargs="+",
+                        choices=[item[0] for item in BENCHMARKS] + ["fmnist_inr"],
+                        default=[item[0] for item in BENCHMARKS],
+                        help="Subset of benchmark datasets; e.g. --datasets fmnist_inr")
     parser.add_argument("--epochs", type=int, default=60,
                         help="Training epochs per single config (default 60)")
     parser.add_argument("--device", default="cuda")
@@ -203,19 +208,22 @@ def main() -> int:
 
     # None of the methods below downloads data. Cache building is local and
     # excluded from timing, matching the assumption that the zoo is present.
-    check_local_data(data_root)
-    ensure_transformer_cache(data_root)
+    chosen = {"fmnist" if name == "fmnist_inr" else name for name in args.datasets}
+    selected = [spec for spec in BENCHMARKS if spec[0] in chosen]
+    check_local_data(data_root, chosen)
+    if "mnist_transformers" in chosen:
+        ensure_transformer_cache(data_root)
 
     rows = []
-    for method in args.methods:
-        print(f"\n=== Benchmarking {method.upper()} with "
-              f"{min(5, args.parallel)} concurrent datasets ===", flush=True)
-        with ThreadPoolExecutor(max_workers=args.parallel) as pool:
-            futures = [pool.submit(measure, spec, method, data_root,
-                                   output, args.epochs, args.device)
-                       for spec in BENCHMARKS]
-            for future in as_completed(futures):
-                rows.append(future.result())
+    jobs = [(spec, method) for spec in selected for method in args.methods]
+    print(f"\n=== Timing {len(jobs)} configurations using up to "
+          f"{args.parallel} concurrent processes ===", flush=True)
+    with ThreadPoolExecutor(max_workers=args.parallel) as pool:
+        futures = [pool.submit(measure, spec, method, data_root,
+                               output, args.epochs, args.device)
+                   for spec, method in jobs]
+        for future in as_completed(futures):
+            rows.append(future.result())
 
     out_csv = output / "timing_results.csv"
     cols = ["method", "dataset", "configs_in_full_sweep", "epochs", "status",
