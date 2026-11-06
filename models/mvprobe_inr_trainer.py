@@ -27,6 +27,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from data import _remap_siren_keys
 from models.logging_utils import print_eval, print_run_config, print_seed_result
+from models.progress import show_progress
 from models.mvprobe import ProbeXClassification as MVProbeClassification
 from models.probex import ProbeXClassification as OriginalProbeXClassification
 
@@ -132,6 +133,8 @@ class INRWeightLayerDataset(Dataset):
                 return
 
         matrices = []
+        cache_label = f"INR weight cache ({split}, layer {self.layer_index})"
+        show_progress(cache_label, 0, len(self.paths))
         for i, path in enumerate(self.paths):
             sd = torch.load(path, map_location="cpu", weights_only=False)
             if "label" in sd:
@@ -145,12 +148,7 @@ class INRWeightLayerDataset(Dataset):
                     f"expected {self.matrix_shape}, got {tuple(x.shape)}"
                 )
             matrices.append(x)
-            if (i + 1) % 5000 == 0:
-                print(
-                    f"[mvprobe-cache] {split} layer {self.layer_index}: "
-                    f"{i + 1:,}/{len(self.paths):,}",
-                    flush=True,
-                )
+            show_progress(cache_label, i + 1, len(self.paths))
 
         self.matrices = torch.stack(matrices, dim=0)
         label_tensor = torch.from_numpy(self.labels.copy()).long()
