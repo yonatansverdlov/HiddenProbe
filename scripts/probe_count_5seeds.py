@@ -251,6 +251,41 @@ def export(dataset: str, probes: list[int], seeds: list[int], methods: list[str]
         writer = csv.DictWriter(f, fieldnames=names)
         writer.writeheader()
         writer.writerows(summary)
+    # Paired per-seed contrasts make the rebuttal comparison easier to read.
+    # Ratios are defined explicitly (not interchanged with raw means).
+    contrast = []
+    if set(METHODS).issubset(methods):
+        for q in probes:
+            hp = {r["seed"]: r for r in items if r["method"] == "hiddenprobe" and r["n_probes"] == q}
+            pg = {r["seed"]: r for r in items if r["method"] == "probegen" and r["n_probes"] == q}
+            if set(hp) != set(seeds) or set(pg) != set(seeds):
+                continue
+            deltas = [float(hp[z]["test_metric"]) - float(pg[z]["test_metric"]) for z in seeds]
+            speedups = [float(pg[z]["eval_time_sec"]) / float(hp[z]["eval_time_sec"]) for z in seeds]
+            memory_ratios = [
+                float(hp[z]["eval_peak_gpu_mb"]) / float(pg[z]["eval_peak_gpu_mb"])
+                for z in seeds
+            ]
+            row = {"dataset": dataset, "n_probes": q, "n_seeds": len(seeds),
+                   "metric_name": METRIC[dataset]}
+            for name, numbers in (
+                ("hidden_minus_probegen", deltas),
+                ("probegen_over_hidden_eval_time", speedups),
+                ("hidden_over_probegen_gpu_peak", memory_ratios),
+            ):
+                row[name + "_mean"], row[name + "_sd"], row[name + "_sem"] = stats(numbers)
+            contrast.append(row)
+    contrast_names = ["dataset", "n_probes", "n_seeds", "metric_name"] + [
+        f"{key}_{suffix}"
+        for key in ("hidden_minus_probegen", "probegen_over_hidden_eval_time",
+                    "hidden_over_probegen_gpu_peak")
+        for suffix in ("mean", "sd", "sem")
+    ]
+    with (out_root / "comparison.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=contrast_names)
+        writer.writeheader()
+        writer.writerows(contrast)
+
     for item in summary:
         print(
             f"[summary] {item['method']:12s} Q={item['n_probes']:3d}: "
