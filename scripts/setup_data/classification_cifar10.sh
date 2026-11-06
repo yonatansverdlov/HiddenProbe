@@ -10,10 +10,9 @@ ARCHIVE="$DOWNLOAD_DIR/siren_cifar_wts.tar"
 # NFN CIFAR-10 SIREN zoo (arXiv:2305.13546), the `siren_cifar_wts` release on Google Drive.
 GDRIVE_FILE_ID="14RUV3eN6-lSOr9XuwyKFQFVcqKl0L2bw"
 
-# Split files (INRDataset format) built from the extracted zoo, next to the checkpoints:
-#   nfn_cifar_split.json        augmented   (train = base + 20 random-init copies per image)
-#   nfn_cifar_split_noaug.json  non-augmented (one SIREN per image everywhere)
-SPLIT_AUG="$TARGET/nfn_cifar_split.json"
+# This setup is intentionally for the non-augmented CIFAR-10 INR task only.
+# The upstream Google Drive link contains a single complete TAR (aug + base):
+# we must download that TAR, but extract only the original SIREN checkpoints.
 SPLIT_NOAUG="$TARGET/nfn_cifar_split_noaug.json"
 
 log "============================================================"
@@ -24,85 +23,118 @@ log "============================================================"
 
 require_cmd tar
 
+# Select the one original INR per CIFAR-10 image. Archive members may be
+# prefixed by "siren_cifar_wts/" or appear directly under randinit_smaller_*.
+# We deliberately use the exact same "aug" naming convention as the split
+# generator, to avoid keeping extra random-initialization augmentations.
+extract_noaug_only() {
+    local archive="$1"
+    local dest="$2"
+    local selected
+    selected="$(mktemp)"
+    if ! tar -tf "$archive" | python -c '
+import pathlib
+import re
+import sys
+count = 0
+for line in sys.stdin:
+    name = line.rstrip("\n")
+    path = pathlib.PurePosixPath(name)
+    if ".." in path.parts or path.is_absolute():
+        continue
+    dirname = path.parent.name
+    if (path.suffix == ".pth"
+            and re.fullmatch(r"net\d+\.pth", path.name)
+            and dirname.startswith("randinit_smaller_")
+            and "aug" not in dirname):
+        print(name)
+        count += 1
+if count == 0:
+    raise SystemExit("No original CIFAR-10 INR .pth files found in TAR")
+' > "$selected"; then
+        rm -f "$selected"
+        return 1
+    fi
+    local count
+    count="$(wc -l < "$selected")"
+    log "Extracting $count original .pth checkpoints only (no augmentation)."
+    local status=0
+    tar -xf "$archive" -C "$dest" -T "$selected" || status=$?
+    rm -f "$selected"
+    return "$status"
+}
+
+# The official no-augmentation data protocol uses 45k/5k/10k networks.
+# A partial prior extraction must NOT be mistaken for a complete dataset.
+have_original_checkpoints() {
+    python - "$TARGET" <<'PY'
+import glob
+import os
+import sys
+root = sys.argv[1]
+files = glob.glob(os.path.join(root, "randinit_smaller_*", "net*.pth"))
+base_count = sum("aug" not in os.path.basename(os.path.dirname(p)) for p in files)
+print(f"[setup] Original CIFAR-10 INR checkpoints present: {base_count}/60000")
+sys.exit(0 if base_count == 60000 else 1)
+PY
+}
+
 build_splits() {
     require_cmd python
-
-    if [[ -s "$SPLIT_AUG" && -s "$SPLIT_NOAUG" ]]; then
-        log "Both NFN split files already exist."
+    if [[ -s "$SPLIT_NOAUG" ]] && python - "$SPLIT_NOAUG" <<'PY'
+import json
+import sys
+try:
+    with open(sys.argv[1]) as handle:
+        d = json.load(handle)
+    assert [len(d[s]["path"]) for s in ("train", "val", "test")] == [45000, 5000, 10000]
+except (OSError, ValueError, KeyError, AssertionError):
+    raise SystemExit(1)
+PY
+    then
+        log "Valid non-augmented split already exists."
         return
     fi
 
-    log "Building augmented and non-augmented NFN split files from the extracted SIREN zoo..."
-    python - "$TARGET" "$SPLIT_AUG" "$SPLIT_NOAUG" <<'PY'
+    log "Building ONLY the non-augmented CIFAR-10 INR split."
+    python - "$TARGET" "$SPLIT_NOAUG" <<'PY'
 import glob
 import json
 import os
 import re
 import sys
-from collections import defaultdict
-
-siren_dir, aug_out, noaug_out = sys.argv[1:]
-prefix = "randinit_smaller"
-val_point = 45000
-test_point = 50000
-
+root, output = sys.argv[1:]
+files = glob.glob(os.path.join(root, "randinit_smaller_*", "net*.pth"))
 idx_re = re.compile(r"net(\d+)\.pth$")
 lbl_re = re.compile(r"_(\d+)s")
-
-files = glob.glob(os.path.join(siren_dir, f"{prefix}_*", "net*.pth"))
-print(f"[nfn-split] globbed {len(files)} .pth files")
-
-all_paths = defaultdict(list)
-base_paths = defaultdict(list)
-labels = {}
-
+base = {}
 for path in files:
     dirname = os.path.basename(os.path.dirname(path))
-    idx_match = idx_re.search(os.path.basename(path))
-    label_match = lbl_re.search(dirname)
-    if not (idx_match and label_match):
+    if "aug" in dirname:
         continue
-
-    idx = int(idx_match.group(1))
-    label = int(label_match.group(1))
-    rel = os.path.relpath(path, siren_dir)
-
-    all_paths[idx].append(rel)
-    labels[idx] = label
-    if "aug" not in dirname:
-        base_paths[idx].append(rel)
-
-def split_for(idx):
-    if idx < val_point:
-        return "train"
-    if idx < test_point:
-        return "val"
-    return "test"
-
-def write_split(path_map, out_path, augmented):
-    out = {s: {"path": [], "label": []} for s in ("train", "val", "test")}
-
-    for idx in sorted(path_map):
-        split = split_for(idx)
-        copies = sorted(path_map[idx])
-        chosen = copies if (augmented and split == "train") else copies[:1]
-        for rel in chosen:
-            out[split]["path"].append(rel)
-            out[split]["label"].append(labels[idx])
-
-    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    with open(out_path, "w") as f:
-        json.dump(out, f)
-
-    print(f"[nfn-split] wrote {out_path}")
-    for split in ("train", "val", "test"):
-        print(f"  {split}: {len(out[split]['label'])}")
-
-if not os.path.isfile(aug_out) or os.path.getsize(aug_out) == 0:
-    write_split(all_paths, aug_out, augmented=True)
-
-if not os.path.isfile(noaug_out) or os.path.getsize(noaug_out) == 0:
-    write_split(base_paths, noaug_out, augmented=False)
+    m_id = idx_re.search(os.path.basename(path))
+    m_lbl = lbl_re.search(dirname)
+    if m_id is None or m_lbl is None:
+        continue
+    idx = int(m_id.group(1))
+    if idx in base:
+        raise RuntimeError(f"Duplicate original INR for image {idx}: {path}")
+    base[idx] = (os.path.relpath(path, root), int(m_lbl.group(1)))
+if len(base) != 60000:
+    raise RuntimeError(
+        f"Expected 60,000 non-augmented CIFAR-10 INRs; got {len(base)}"
+    )
+result = {s: {"path": [], "label": []} for s in ("train", "val", "test")}
+for idx, (path, label) in sorted(base.items()):
+    split = "train" if idx < 45000 else ("val" if idx < 50000 else "test")
+    result[split]["path"].append(path)
+    result[split]["label"].append(label)
+counts = [len(result[s]["path"]) for s in ("train", "val", "test")]
+if counts != [45000, 5000, 10000]:
+    raise RuntimeError(f"Unexpected non-augmented splits: {counts}")
+with open(output, "w") as handle:
+    json.dump(result, handle)
+print(f"[nfn-split] wrote {output}: train/val/test={counts}")
 PY
 }
 
@@ -110,16 +142,14 @@ log "Ensuring target directory exists..."
 mkdir -p "$TARGET"
 log "Target directory ready."
 
-log "Step 1: checking whether the dataset is already complete."
-if find "$TARGET" -type f -name '*.pth' -print -quit 2>/dev/null | grep -q .; then
-    log "Found CIFAR10 INR checkpoint files."
-    log "$NAME dataset already exists at: $TARGET"
-    log "Skipping download and extraction."
+log "Step 1: checking whether all 60,000 original INRs are present."
+if have_original_checkpoints; then
+    log "Original CIFAR-10 INRs already extracted; skipping download and extraction."
     build_splits
-    log "Nothing else to do."
+    finish "$TARGET"
     exit 0
 fi
-log "$NAME dataset is incomplete or missing."
+log "Original CIFAR-10 INRs are incomplete or missing."
 
 log "Step 2: checking for an existing downloaded archive."
 if [[ -s "$ARCHIVE" ]]; then
@@ -132,24 +162,16 @@ else
     log "CIFAR10 INR archive download complete."
 fi
 
-log "Step 3: extracting CIFAR10 SIREN weights directly into final target."
-rm -rf "$TARGET"
+log "Step 3: extracting only original (non-augmented) SIREN weights."
 mkdir -p "$TARGET"
-log "Extraction may take some time."
 
-if ! tar -xf "$ARCHIVE" -C "$TARGET"; then
-    log "Extraction failed; assuming the archive is corrupted or incomplete."
-    rm -rf "$TARGET"
+if ! extract_noaug_only "$ARCHIVE" "$TARGET"; then
+    log "Selective extraction failed. Keeping any existing checkpoints intact."
     rm -f "$ARCHIVE" "${ARCHIVE}.part"
-
-    log "Downloading CIFAR10 SIREN weights again from scratch..."
+    log "Re-downloading the upstream full archive for a clean retry..."
     download_gdrive "$GDRIVE_FILE_ID" "$ARCHIVE"
-
-    mkdir -p "$TARGET"
-    if ! tar -xf "$ARCHIVE" -C "$TARGET"; then
-        rm -rf "$TARGET"
-        rm -f "$ARCHIVE" "${ARCHIVE}.part"
-        die "CIFAR10 INR extraction failed twice."
+    if ! extract_noaug_only "$ARCHIVE" "$TARGET"; then
+        die "Selective CIFAR-10 original INR extraction failed twice."
     fi
 fi
 
@@ -166,17 +188,12 @@ if [[ -d "$SRC" ]]; then
     rmdir "$SRC" 2>/dev/null || true
 fi
 
-find "$TARGET" -type f -name '*.pth' -print -quit 2>/dev/null | grep -q . \
-    || die "Extraction completed, but no .pth checkpoints were found."
+log "Step 7: checking all original CIFAR-10 INRs are present."
+have_original_checkpoints \
+    || die "Selective extraction is incomplete; refusing to build partial splits."
 
-log "Step 7: running final dataset sanity check."
-find "$TARGET" -type f -name '*.pth' -print -quit 2>/dev/null | grep -q . \
-    || die "Final sanity check failed: no CIFAR10 INR checkpoints found."
-log "Final dataset sanity check passed."
-
-log "Step 8: building the augmented and non-augmented split files."
+log "Step 8: building the non-augmented split only."
 build_splits
-require_file "$SPLIT_AUG"
 require_file "$SPLIT_NOAUG"
 
 log "Step 9: cleaning up downloaded archive."
