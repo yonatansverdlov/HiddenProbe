@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# MVProbe CIFAR10 non-aug INR classification.
+# MVProbe Fashion-MNIST INR classification.
 # Released four-view implementation with ReduceLROnPlateau for our sweep protocol.
 # Sweep: hidden weights only; final output/RGB layer is excluded.
 
@@ -66,6 +66,7 @@ for LAYER in 0 1; do
               continue
             fi
             "$PYTHON" models/mvprobe_inr_trainer.py \
+              --model_variant mvprobe \
               --data_dir "$DATA_DIR" \
               --split_json "$SPLIT" \
               --dataset_name "Fashion-MNIST INR" \
@@ -172,6 +173,7 @@ for SEED in 0 1 2 3 4; do
     continue
   fi
   "$PYTHON" models/mvprobe_inr_trainer.py \
+    --model_variant mvprobe \
     --data_dir "$DATA_DIR" \
     --split_json "$SPLIT" \
     --dataset_name "Fashion-MNIST INR" \
