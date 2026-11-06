@@ -1314,9 +1314,20 @@ def run_one_seed(args, seed, exp_dir):
     if probe_count_profile:
         # Training is finished; don't include Adam moments in the evaluation baseline.
         optimizer.state.clear()
-        (best_test_results, eval_profile) = timed_eval(
-            lambda: evaluate(test_loader), n_examples=len(test_set), device=device
+        # The two models have different BEST training batch sizes (64 vs 32).
+        # Compare test inference at the same fixed batch size, without
+        # changing training/validation optimization.
+        eval_batch_size = int(os.environ.get("PROBE_COUNT_EVAL_BS", "32"))
+        if eval_batch_size < 1:
+            raise ValueError("PROBE_COUNT_EVAL_BS must be >= 1")
+        benchmark_loader = torch.utils.data.DataLoader(
+            test_set, batch_size=eval_batch_size, shuffle=False,
+            num_workers=args.n_workers, pin_memory=False, collate_fn=collate_fn,
         )
+        (best_test_results, eval_profile) = timed_eval(
+            lambda: evaluate(benchmark_loader), n_examples=len(test_set), device=device
+        )
+        eval_profile["eval_batch_size"] = eval_batch_size
         save_benchmark(
             exp_dir,
             method=args.method, dataset=args.dataset, seed=seed,
