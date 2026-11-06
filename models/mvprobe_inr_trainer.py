@@ -63,10 +63,30 @@ class INRWeightLayerDataset(Dataset):
         with split_path.open() as f:
             record = json.load(f)[split]
 
-        self.paths = [self.data_dir / Path(p) for p in record["path"]]
+        # CIFAR-10 keeps checkpoints directly under data_dir, but the
+        # Fashion-MNIST setup script extracts them under data_dir/dataset/.
+        # Official split files use paths like "fmnist_inrs/train/model_*.pth".
+        # Select the correct checkpoint root once per split (no expensive
+        # stat() on every one of the tens of thousands of model files).
+        relative_paths = [Path(p) for p in record["path"]]
         self.labels = np.asarray(record["label"], dtype=np.int64)
-        if not self.paths:
+        if not relative_paths:
             raise RuntimeError(f"Empty {split} split in {split_path}")
+        if relative_paths[0].is_absolute():
+            self.paths = relative_paths
+        else:
+            roots = (self.data_dir, self.data_dir / "dataset")
+            selected_root = next(
+                (root for root in roots if (root / relative_paths[0]).is_file()),
+                None,
+            )
+            if selected_root is None:
+                attempted = [str(root / relative_paths[0]) for root in roots]
+                raise FileNotFoundError(
+                    f"Could not locate {split} checkpoint. Tried: {attempted}. "
+                    f"Check extracted weights and split paths."
+                )
+            self.paths = [selected_root / p for p in relative_paths]
 
         first = torch.load(self.paths[0], map_location="cpu", weights_only=False)
         if "label" in first:
