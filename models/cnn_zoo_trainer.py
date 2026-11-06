@@ -533,6 +533,7 @@ else:
             lambda: ev(teN, teY, return_preds=True),
             n_examples=len(teN), device=DEV,
         )
+        eval_profile["eval_batch_size"] = args.eval_cnn_bs
         save_benchmark(
             args.out_dir, method="hiddenprobe", dataset=dataset_label.lower(),
             seed=args.seed, n_probes=args.n_out_probes,
