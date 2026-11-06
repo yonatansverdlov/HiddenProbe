@@ -40,6 +40,8 @@ def timed_eval(fn, *, n_examples: int, device: str | torch.device):
             "torch.cuda.max_memory_allocated during full test evaluation; "
             "includes pre-existing live tensors; incremental subtracts baseline"
         ),
+        "gpu_name": torch.cuda.get_device_name(dev) if cuda else None,
+        "torch_version": str(torch.__version__),
     }
 
 
