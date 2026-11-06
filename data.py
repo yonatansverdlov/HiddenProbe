@@ -700,7 +700,11 @@ def load_svhn_cnns(split, activation=None, dev="cpu", data_dir=DATA_DIR, split_c
         activations = activations[:limit]
 
     nets = []
-    for ri, act in zip(rows, activations):
+    show_progress = os.environ.get("SHOW_ZOO_LOAD_PROGRESS") == "1"
+    n_total = len(rows)
+    if show_progress:
+        print(f"[SVHN-ZOO] Loading {split}: 0/{n_total} target CNNs -> {dev}", flush=True)
+    for model_index, (ri, act) in enumerate(zip(rows, activations), start=1):
         act = str(act).lower()
         if act not in _ACT:
             raise ValueError(
@@ -711,6 +715,8 @@ def load_svhn_cnns(split, activation=None, dev="cpu", data_dir=DATA_DIR, split_c
         for p in m.parameters():
             p.requires_grad_(False)
         nets.append(m.to(dev))
+        if show_progress and (model_index % 1000 == 0 or model_index == n_total):
+            print(f"[SVHN-ZOO] Loading {split}: {model_index}/{n_total} ({100.0*model_index/max(1,n_total):.1f}%)", flush=True)
 
     return nets, torch.tensor(scores)
 
