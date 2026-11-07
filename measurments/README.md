@@ -12,7 +12,7 @@ No retraining or downloading is required.
 
 ~~~bash
 # 16/32/64/128/256 probes, both methods, both forward and training-step costs.
-# Defaults to the first 512 train INRs, batch size 32, BF16 and 1 measured pass.
+# Defaults to the ENTIRE train split, batch size 32, BF16 and 1 measured pass.
 python measurments/benchmark_fmnist_inr_probe_cost.py
 
 # Forward-only on the entire Fashion-MNIST INR TRAIN split,
@@ -22,12 +22,12 @@ python measurments/benchmark_fmnist_inr_probe_cost.py --phase forward --limit 0
 # Smaller smoke run or GPU with limited memory:
 python measurments/benchmark_fmnist_inr_probe_cost.py --phase both --limit 32
 
-# More robust timing on the same 512 target INRs:
+# More robust timing on the entire train split:
 python measurments/benchmark_fmnist_inr_probe_cost.py --repeats 3
 ~~~
 
 Output: measurments/fmnist_inr_probe_cost.csv, written one configuration
-at a time. The default 5 probe counts x 2 methods x 2 phases gives 20 rows.
+at a time. The default full training split and 5 probe counts x 2 methods x 2 phases give 20 rows.
 Using --phase forward gives the 10-row comparison.
 
 ### What the measurements mean
