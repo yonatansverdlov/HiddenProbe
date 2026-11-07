@@ -31,7 +31,7 @@ both methods**, before final five-seed evaluation.
 - Weight decay: `{0, 1e-5, 1e-4}`
 - Scheduler: `none` (fixed learning rate; factor irrelevant) OR `plateau` (`ReduceLROnPlateau`, factor in `{0.2, 0.3, 0.5, 0.7}`); these are **five** distinct scheduler choices, not eight
 - When `scheduler=plateau`: patience 5; minimum learning rate `1e-6`
-- Sweep: seed 0, **up to 200 epochs**, with early stopping after **10 consecutive epochs without strict improvement** in validation accuracy (classification) or validation Kendall tau (regression). The validation-best model is selected; the test set is not evaluated.
+- Sweep: seed 0, **all 200 epochs**, with `--early_stop_patience 0` (no early stopping). Select the best checkpoint by validation accuracy (classification) or Kendall tau (regression); do not evaluate test.
 - Final: selected hyperparameters, seeds 0–4, **500 complete epochs** (`--early_stop_patience 0`: no early stopping); test only after selecting the best epoch on validation.
 - `SWEEP_EPOCHS`, `FINAL_EPOCHS`, `REP_DIM`, `OUT_DIR`, and
   `DATA_ROOT` are environmental overrides.
@@ -39,11 +39,10 @@ both methods**, before final five-seed evaluation.
 The output is a per-experiment `summary.json`, aggregate
 `sweep_results.csv`, `selected_config.json`, and a five-seed summary.
 Completed configurations are skipped on re-run. New sweep/final output directories use
-`q128_p128_bs128_es10` / `q128_p128_bs128_500` in their names so older
+`q128_p128_bs128_full200` / `q128_p128_bs128_500` in their names so older
 sweeps and finals cannot be mistaken for the new protocol. Per-run `summary.json`
 records `epochs` (maximum), `epochs_run` (actual), `early_stop_patience`, and
-`early_stopped` for auditing. The scheduler's Plateau patience (5) and the
-sweep's independent early-stopping patience (10) are distinct settings.
+`early_stopped` for auditing. The scheduler's Plateau patience (5) only controls learning-rate reduction; it does not stop training.
 
 **Probe-count interpretation:** ProbeX has one first-order view per probe;
 MVProbe computes *four* weight-space views. `n_probes` is therefore not a
