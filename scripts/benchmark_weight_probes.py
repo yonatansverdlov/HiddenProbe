@@ -23,14 +23,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BENCHMARKS = (
-    ("mnist_transformers", "MNIST-Transformers", 2880, "regression",
+    ("mnist_transformers", "MNIST-Transformers", 360, "regression",
      "models/mvprobe_transformer_trainer.py"),
-    ("svhn", "SVHN", 1440, "regression", "models/mvprobe_svhn_trainer.py"),
-    ("mnist_regression", "MNIST regression", 1440, "regression",
+    ("svhn", "SVHN", 180, "regression", "models/mvprobe_svhn_trainer.py"),
+    ("mnist_regression", "MNIST regression", 180, "regression",
      "models/mvprobe_svhn_trainer.py"),
-    ("fmnist", "FMNIST INR", 960, "classification",
+    ("fmnist", "FMNIST INR", 120, "classification",
      "models/mvprobe_inr_trainer.py"),
-    ("cifar10", "CIFAR-10 INR", 960, "classification",
+    ("cifar10", "CIFAR-10 INR", 120, "classification",
      "models/mvprobe_inr_trainer.py"),
 )
 
@@ -110,6 +110,7 @@ def command_for(dataset: str, method: str, trainer: str, data_root: Path,
         "--seed", "0",
         "--device", device,
         "--skip_test_eval",
+        "--early_stop_patience", "10",
         "--out_dir", str(output),
     ]
     if dataset == "mnist_transformers":
@@ -171,7 +172,7 @@ def measure(spec: tuple, method: str, data_root: Path, output: Path,
                                          if training_sec is not None else "",
         "estimated_full_sweep_job_hours": round(
             (training_sec if training_sec is not None else wall)
-            * n_configs * 200 / epochs / 3600, 2
+            * n_configs / 3600, 2
         ),
         "log": str(logfile.relative_to(ROOT)) if logfile.is_relative_to(ROOT) else str(logfile),
     }
@@ -193,7 +194,7 @@ def main() -> int:
                         default=[item[0] for item in BENCHMARKS],
                         help="Subset of benchmark datasets; e.g. --datasets fmnist_inr")
     parser.add_argument("--epochs", type=int, default=60,
-                        help="Training epochs per single config (default 60)")
+                        help="Maximum training epochs per single config (default 60; early-stop patience 10)")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--data-root", type=Path,
                         default=Path(os.environ.get("DATA_ROOT", ROOT / "data")))
@@ -245,7 +246,7 @@ def main() -> int:
         print(f"TOTAL: ~{total:.2f} job-hours; "
               f"rough wall-clock at parallel={args.parallel}: "
               f"~{total/args.parallel:.2f} hours.")
-        print("WARNING: This assumes similar throughput under a full sweep; "
+        print("WARNING: Early stopping is enabled. This estimate assumes similar stop epochs, "
               "GPU contention, layer sizes, and I/O can change timing.")
     else:
         print("Some jobs failed: inspect their training.log files. "
