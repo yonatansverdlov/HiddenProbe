@@ -10,39 +10,40 @@ the same `scripts/setup_data/*` download/preparation scripts as HiddenProbe.
 
 | Benchmark | ProbeX | MVProbe | Configs per method |
 | --- | --- | --- | ---: |
-| MNIST-Transformers (accuracy regression) | `bash scripts/ProbeX/regression/run_mnist_transformers.sh` | `bash scripts/MVProbe/regression/run_mnist_transformers.sh` | 2880 |
-| SVHN (accuracy regression) | `bash scripts/ProbeX/regression/run_svhn_regression.sh` | `bash scripts/MVProbe/regression/run_svhn_regression.sh` | 1440 |
-| MNIST (accuracy regression) | `bash scripts/ProbeX/regression/run_mnist_regression.sh` | `bash scripts/MVProbe/regression/run_mnist_regression.sh` | 1440 |
-| FMNIST (INR classification) | `bash scripts/ProbeX/classification/run_fmnist_inr.sh` | `bash scripts/MVProbe/classification/run_fmnist_inr.sh` | 960 |
-| CIFAR-10 (INR classification, non-augmented) | `bash scripts/ProbeX/classification/run_cifar10_inr_nonaug.sh` | `bash scripts/MVProbe/classification/run_cifar10_inr_nonaug.sh` | 960 |
+| MNIST-Transformers (accuracy regression) | `bash scripts/ProbeX/regression/run_mnist_transformers.sh` | `bash scripts/MVProbe/regression/run_mnist_transformers.sh` | 360 |
+| SVHN (accuracy regression) | `bash scripts/ProbeX/regression/run_svhn_regression.sh` | `bash scripts/MVProbe/regression/run_svhn_regression.sh` | 180 |
+| MNIST (accuracy regression) | `bash scripts/ProbeX/regression/run_mnist_regression.sh` | `bash scripts/MVProbe/regression/run_mnist_regression.sh` | 180 |
+| FMNIST (INR classification) | `bash scripts/ProbeX/classification/run_fmnist_inr.sh` | `bash scripts/MVProbe/classification/run_fmnist_inr.sh` | 120 |
+| CIFAR-10 (INR classification, non-augmented) | `bash scripts/ProbeX/classification/run_cifar10_inr_nonaug.sh` | `bash scripts/MVProbe/classification/run_cifar10_inr_nonaug.sh` | 120 |
 
-Total: **7680 hyperparameter configurations per method**, **15,360 across
-both methods**, before final five-seed evaluation. This is computationally
-expensive; consider reducing the grid before production runs.
+Total: **960 hyperparameter configurations per method**, **1,920 across
+both methods**, before final five-seed evaluation.
 
 ## Common sweep grid
 
 - Observed weight matrix (selected layer): INR layers 0/1;
   CNN conv layers 0/1/2; Transformers six selected weight matrices below
-- Learned weight probes: `n_probes = {64, 128}`
-- Probe projection dimension: `proj_dim = {64, 128}`
+- Learned weight probes: `n_probes = 128` (fixed)
+- Probe projection dimension: `proj_dim = 128` (fixed)
 - Representation dimension: `rep_dim = 512` (fixed, overridable with `REP_DIM`)
 - Adam learning rate: `lr = {1e-4, 3e-4, 5e-4, 1e-3}`
-- Batch size: `{64, 128}`
+- Batch size: `128` (fixed)
 - Weight decay: `{0, 1e-5, 1e-4}`
 - Scheduler: `none` (fixed learning rate; factor irrelevant) OR `plateau` (`ReduceLROnPlateau`, factor in `{0.2, 0.3, 0.5, 0.7}`); these are **five** distinct scheduler choices, not eight
 - When `scheduler=plateau`: patience 5; minimum learning rate `1e-6`
-- Sweep: seed 0, 200 epochs, **validation-only model selection**
-- Final: selected hyperparameters, seeds 0–4, 500 epochs; test only after
-  selecting the best epoch on validation
+- Sweep: seed 0, **up to 200 epochs**, with early stopping after **10 consecutive epochs without strict improvement** in validation accuracy (classification) or validation Kendall tau (regression). The validation-best model is selected; the test set is not evaluated.
+- Final: selected hyperparameters, seeds 0–4, **500 complete epochs** (`--early_stop_patience 0`: no early stopping); test only after selecting the best epoch on validation.
 - `SWEEP_EPOCHS`, `FINAL_EPOCHS`, `REP_DIM`, `OUT_DIR`, and
   `DATA_ROOT` are environmental overrides.
 
 The output is a per-experiment `summary.json`, aggregate
 `sweep_results.csv`, `selected_config.json`, and a five-seed summary.
 Completed configurations are skipped on re-run. New sweep/final output directories use
-`scheduler200` / `scheduler500` in their names so older 60/150-epoch outputs
-cannot be mistaken for completed 200/500-epoch experiments.
+`q128_p128_bs128_es10` / `q128_p128_bs128_500` in their names so older
+sweeps and finals cannot be mistaken for the new protocol. Per-run `summary.json`
+records `epochs` (maximum), `epochs_run` (actual), `early_stop_patience`, and
+`early_stopped` for auditing. The scheduler's Plateau patience (5) and the
+sweep's independent early-stopping patience (10) are distinct settings.
 
 **Probe-count interpretation:** ProbeX has one first-order view per probe;
 MVProbe computes *four* weight-space views. `n_probes` is therefore not a
