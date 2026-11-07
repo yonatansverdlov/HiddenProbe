@@ -4,9 +4,9 @@ set -euo pipefail
 # MVProbe on the existing MNIST-Transformers model zoo.
 #
 # Stage 1 (seed 0, validation only):
-#   6 selected transformer weight matrices x 2 n_probes x 2 proj_dim x 3 learning rates
-#   x 2 batch sizes x 3 weight decays x 4 plateau factors = 1728 configs.
-#   60 epochs each by default; the held-out test split is never instantiated or evaluated.
+#   6 selected transformer weight matrices x 2 n_probes x 2 proj_dim x 4 learning rates
+#   x 2 batch sizes x 3 weight decays x 5 scheduler settings = 2880 configs.
+#   200 epochs each by default; the held-out test split is never instantiated or evaluated.
 #   Scheduler: ReduceLROnPlateau on validation metric.
 #
 # Stage 2:
@@ -33,15 +33,15 @@ PYTHON="${PYTHON:-python}"
 
 
 
-SWEEP_EPOCHS="${SWEEP_EPOCHS:-60}"
-FINAL_EPOCHS="${FINAL_EPOCHS:-150}"
+SWEEP_EPOCHS="${SWEEP_EPOCHS:-200}"
+FINAL_EPOCHS="${FINAL_EPOCHS:-500}"
 REP_DIM="${REP_DIM:-512}"
 DEVICE="${DEVICE:-cuda}"
 PLATEAU_PATIENCE="${PLATEAU_PATIENCE:-5}"
 PLATEAU_MIN_LR="${PLATEAU_MIN_LR:-1e-6}"
 
-SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_mnist_transformers_sweep_conv_plateau_factor_s0"
-FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_mnist_transformers_best_conv_plateau_factor"
+SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_mnist_transformers_sweep_scheduler200_s0"
+FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_mnist_transformers_best_scheduler500"
 mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
 is_complete_summary() {
@@ -60,22 +60,29 @@ PY
 
 
 RUN=0
-TOTAL=1728
+TOTAL=2880
 for LAYER in 0 1 2 3 4 5; do
   for N_PROBES in 64 128; do
     for PROJ_DIM in 64 128; do
-      for LR in 1e-4 3e-4 5e-4; do
+      for LR in 1e-4 3e-4 5e-4 1e-3; do
         for BATCH_SIZE in 64 128; do
           for WEIGHT_DECAY in 0 1e-5 1e-4; do
-            for PLATEAU_FACTOR in 0.2 0.3 0.5 0.7; do
+            for SCHED_SPEC in none plateau_0.2 plateau_0.3 plateau_0.5 plateau_0.7; do
+              if [[ "$SCHED_SPEC" == "none" ]]; then
+                SCHEDULER="none"
+                PLATEAU_FACTOR="0.5"  # ignored when scheduler=none
+              else
+                SCHEDULER="plateau"
+                PLATEAU_FACTOR="${SCHED_SPEC#plateau_}"
+              fi
               RUN=$((RUN + 1))
-            NAME="mvprobe_mnist_transformers_L${LAYER}_Q${N_PROBES}_P${PROJ_DIM}_lr${LR}_bs${BATCH_SIZE}_wd${WEIGHT_DECAY}_fac${PLATEAU_FACTOR}_s0"
+            NAME="mvprobe_mnist_transformers_L${LAYER}_Q${N_PROBES}_P${PROJ_DIM}_lr${LR}_bs${BATCH_SIZE}_wd${WEIGHT_DECAY}_sched${SCHEDULER}_fac${PLATEAU_FACTOR}_s0"
             DIR="$SWEEP_ROOT/$NAME"
             echo
             echo "================================================================================"
             echo "CONFIG $RUN/$TOTAL"
             echo "================================================================================"
-            echo "========== SWEEP [$RUN/$TOTAL] layer=$LAYER Q=$N_PROBES proj=$PROJ_DIM lr=$LR bs=$BATCH_SIZE wd=$WEIGHT_DECAY factor=$PLATEAU_FACTOR =========="
+            echo "========== SWEEP [$RUN/$TOTAL] layer=$LAYER Q=$N_PROBES proj=$PROJ_DIM lr=$LR bs=$BATCH_SIZE wd=$WEIGHT_DECAY scheduler=$SCHEDULER factor=$PLATEAU_FACTOR =========="
             if is_complete_summary "$DIR/summary.json" "best_val_tau"; then
               echo "CONFIG $RUN/$TOTAL already completed: $NAME"
               echo "Skipping."
@@ -89,7 +96,7 @@ for LAYER in 0 1 2 3 4 5; do
               --proj_dim "$PROJ_DIM" \
               --rep_dim "$REP_DIM" \
               --lr "$LR" \
-              --scheduler plateau \
+              --scheduler "$SCHEDULER" \
               --plateau_factor "$PLATEAU_FACTOR" \
               --plateau_patience "$PLATEAU_PATIENCE" \
               --plateau_min_lr "$PLATEAU_MIN_LR" \
@@ -128,13 +135,14 @@ for path in root.glob("*/summary.json"):
         "lr": float(s["lr"]),
         "batch_size": int(s["batch_size"]),
         "weight_decay": float(s["weight_decay"]),
+        "scheduler": str(s["scheduler"]),
         "plateau_factor": float(s["plateau_factor"]),
         "best_val_tau": float(s["best_val_tau"]),
         "best_epoch": int(s["best_epoch"]),
         "params": int(s["params"]),
     })
 
-if len(rows) != 1728:
+if len(rows) != 2880:
     raise RuntimeError(f"Expected 1728 completed sweep configs, found {len(rows)}")
 
 rows.sort(key=lambda r: r["best_val_tau"], reverse=True)
@@ -152,27 +160,27 @@ for k, v in best.items():
 print(f"Ranked results: {root / 'sweep_results.csv'}")
 PY
 
-read -r BEST_LAYER BEST_Q BEST_PROJ BEST_REP BEST_LR BEST_BS BEST_WD BEST_FACTOR < <(
+read -r BEST_LAYER BEST_Q BEST_PROJ BEST_REP BEST_LR BEST_BS BEST_WD BEST_FACTOR BEST_SCHEDULER < <(
   "$PYTHON" - "$SWEEP_ROOT/selected_config.json" <<'PY'
 import json, sys
 s = json.load(open(sys.argv[1]))
 print(
     s["layer_index"], s["n_probes"], s["proj_dim"], s["rep_dim"],
-    s["lr"], s["batch_size"], s["weight_decay"], s["plateau_factor"]
+    s["lr"], s["batch_size"], s["weight_decay"], s["plateau_factor"], s["scheduler"]
 )
 PY
 )
 
 echo
 echo "========== FINAL CONFIG =========="
-echo "layer=$BEST_LAYER Q=$BEST_Q proj_dim=$BEST_PROJ rep_dim=$BEST_REP lr=$BEST_LR bs=$BEST_BS wd=$BEST_WD factor=$BEST_FACTOR epochs=$FINAL_EPOCHS"
+echo "layer=$BEST_LAYER Q=$BEST_Q proj_dim=$BEST_PROJ rep_dim=$BEST_REP lr=$BEST_LR bs=$BEST_BS wd=$BEST_WD scheduler=$BEST_SCHEDULER factor=$BEST_FACTOR epochs=$FINAL_EPOCHS"
 echo "=================================="
 
 SUMMARIES=()
 FINAL_RUN=0
 for SEED in 0 1 2 3 4; do
   FINAL_RUN=$((FINAL_RUN + 1))
-  NAME="mvprobe_mnist_transformers_L${BEST_LAYER}_Q${BEST_Q}_P${BEST_PROJ}_lr${BEST_LR}_bs${BEST_BS}_wd${BEST_WD}_fac${BEST_FACTOR}_s${SEED}"
+  NAME="mvprobe_mnist_transformers_L${BEST_LAYER}_Q${BEST_Q}_P${BEST_PROJ}_lr${BEST_LR}_bs${BEST_BS}_wd${BEST_WD}_sched${BEST_SCHEDULER}_fac${BEST_FACTOR}_s${SEED}"
   DIR="$FINAL_ROOT/$NAME"
   SUMMARIES+=("$DIR/summary.json")
   echo
@@ -192,7 +200,7 @@ for SEED in 0 1 2 3 4; do
     --proj_dim "$BEST_PROJ" \
     --rep_dim "$BEST_REP" \
     --lr "$BEST_LR" \
-    --scheduler plateau \
+    --scheduler "$BEST_SCHEDULER" \
     --plateau_factor "$BEST_FACTOR" \
     --plateau_patience "$PLATEAU_PATIENCE" \
     --plateau_min_lr "$PLATEAU_MIN_LR" \
@@ -224,7 +232,7 @@ print(
     f"proj_dim={selected['proj_dim']}, rep_dim={selected['rep_dim']}, "
     f"lr={selected['lr']}, batch_size={selected['batch_size']}, "
     f"weight_decay={selected['weight_decay']}, "
-    f"plateau_factor={selected['plateau_factor']}, "
+    f"scheduler={selected['scheduler']}, plateau_factor={selected['plateau_factor']}, "
     f"sweep_val_tau={selected['best_val_tau']:.4f}"
 )
 print_final_summary(
