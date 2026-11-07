@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from .hidden_layer_selection import resolve_hidden_layer_ids
 from .probegen_core_utils import (
     apply_inductive_per_probe_init,
     build_hidden_aggregators,
@@ -58,6 +59,7 @@ class ProbeGen(nn.Module):
         r_per_hidden: int = 2,
         rank: int = 8,
         seed: Optional[int] = None,
+        hidden_layer_ids: Optional[list[int] | list[str] | str] = None,
     ):
         super().__init__()
 
@@ -85,6 +87,9 @@ class ProbeGen(nn.Module):
         self.models_c_out = models_c_out
         self.include_hidden_features = include_hidden_features
         self.n_hidden_target_layers = n_hidden_target_layers
+        self.hidden_layer_ids = resolve_hidden_layer_ids(
+            hidden_layer_ids, n_hidden_target_layers, include_hidden_features
+        )
         self.r_per_hidden = r_per_hidden
         self.rank = rank
 
@@ -100,7 +105,7 @@ class ProbeGen(nn.Module):
 
             if include_hidden_features:
                 self.hidden_aggregators = build_hidden_aggregators(
-                    n_hidden_target_layers=n_hidden_target_layers,
+                    n_hidden_target_layers=len(self.hidden_layer_ids),
                     r_per_hidden=r_per_hidden,
                     rank=rank,
                 )
@@ -108,7 +113,7 @@ class ProbeGen(nn.Module):
                 # Hidden-feature representation is currently defined for vector
                 # probes: [x, hidden_features..., f(x)].
                 token_input_dim = (
-                    n_hidden_target_layers * r_per_hidden
+                    len(self.hidden_layer_ids) * r_per_hidden
                     + models_c_out
                 )
             else:
@@ -219,10 +224,11 @@ class ProbeGen(nn.Module):
                 "Use include_hidden_features=False for image probes."
             )
 
-        hidden_layers = find_hidden_linear_layers(
+        all_hidden_layers = find_hidden_linear_layers(
             net,
             expected_count=self.n_hidden_target_layers,
         )
+        hidden_layers = [all_hidden_layers[index] for index in self.hidden_layer_ids]
 
         y, hidden_activations = run_with_linear_activation_hooks(
             net,
@@ -231,9 +237,9 @@ class ProbeGen(nn.Module):
         )
         self._validate_output(y)
 
-        if len(hidden_activations) != self.n_hidden_target_layers:
+        if len(hidden_activations) != len(self.hidden_layer_ids):
             raise RuntimeError(
-                f"Expected {self.n_hidden_target_layers} hidden activations, "
+                f"Expected {len(self.hidden_layer_ids)} hidden activations, "
                 f"got {len(hidden_activations)}."
             )
 
