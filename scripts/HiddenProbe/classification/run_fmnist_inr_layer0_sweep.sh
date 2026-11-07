@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # HiddenProbe INR layer ablation: Fashion-MNIST, hidden layer 0 + output.
-# Sweep: 24 plateau configs, seed 0, 20 epochs.
+# Sweep: 24 plateau + 3 cosine configs, seed 0, 20 epochs.
 # Final: 5 seeds, 30 epochs, best configuration selected on validation only.
 #
 # Usage: bash scripts/HiddenProbe/classification/run_fmnist_inr_layer0_sweep.sh
