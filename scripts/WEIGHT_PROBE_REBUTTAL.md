@@ -1,4 +1,4 @@
-# ProbeX / MVProbe five-benchmark rebuttal sweeps
+# ProbeX / MVProbe five-benchmark rebuttal sweeps (200/500 epochs)
 
 This branch restores the weight-space ProbeX (single-view) and MVProbe (four-view)
 encoders and runs **the same hyperparameter grid independently for each method**.
@@ -10,13 +10,13 @@ the same `scripts/setup_data/*` download/preparation scripts as HiddenProbe.
 
 | Benchmark | ProbeX | MVProbe | Configs per method |
 | --- | --- | --- | ---: |
-| MNIST-Transformers (accuracy regression) | `bash scripts/ProbeX/regression/run_mnist_transformers.sh` | `bash scripts/MVProbe/regression/run_mnist_transformers.sh` | 1728 |
-| SVHN (accuracy regression) | `bash scripts/ProbeX/regression/run_svhn_regression.sh` | `bash scripts/MVProbe/regression/run_svhn_regression.sh` | 864 |
-| MNIST (accuracy regression) | `bash scripts/ProbeX/regression/run_mnist_regression.sh` | `bash scripts/MVProbe/regression/run_mnist_regression.sh` | 864 |
-| FMNIST (INR classification) | `bash scripts/ProbeX/classification/run_fmnist_inr.sh` | `bash scripts/MVProbe/classification/run_fmnist_inr.sh` | 576 |
-| CIFAR-10 (INR classification, non-augmented) | `bash scripts/ProbeX/classification/run_cifar10_inr_nonaug.sh` | `bash scripts/MVProbe/classification/run_cifar10_inr_nonaug.sh` | 576 |
+| MNIST-Transformers (accuracy regression) | `bash scripts/ProbeX/regression/run_mnist_transformers.sh` | `bash scripts/MVProbe/regression/run_mnist_transformers.sh` | 2880 |
+| SVHN (accuracy regression) | `bash scripts/ProbeX/regression/run_svhn_regression.sh` | `bash scripts/MVProbe/regression/run_svhn_regression.sh` | 1440 |
+| MNIST (accuracy regression) | `bash scripts/ProbeX/regression/run_mnist_regression.sh` | `bash scripts/MVProbe/regression/run_mnist_regression.sh` | 1440 |
+| FMNIST (INR classification) | `bash scripts/ProbeX/classification/run_fmnist_inr.sh` | `bash scripts/MVProbe/classification/run_fmnist_inr.sh` | 960 |
+| CIFAR-10 (INR classification, non-augmented) | `bash scripts/ProbeX/classification/run_cifar10_inr_nonaug.sh` | `bash scripts/MVProbe/classification/run_cifar10_inr_nonaug.sh` | 960 |
 
-Total: **4608 hyperparameter configurations per method**, **9216 across
+Total: **7680 hyperparameter configurations per method**, **15,360 across
 both methods**, before final five-seed evaluation. This is computationally
 expensive; consider reducing the grid before production runs.
 
@@ -27,20 +27,22 @@ expensive; consider reducing the grid before production runs.
 - Learned weight probes: `n_probes = {64, 128}`
 - Probe projection dimension: `proj_dim = {64, 128}`
 - Representation dimension: `rep_dim = 512` (fixed, overridable with `REP_DIM`)
-- Adam learning rate: `lr = {1e-4, 3e-4, 5e-4}`
+- Adam learning rate: `lr = {1e-4, 3e-4, 5e-4, 1e-3}`
 - Batch size: `{64, 128}`
 - Weight decay: `{0, 1e-5, 1e-4}`
-- `ReduceLROnPlateau` factor: `{0.2, 0.3, 0.5, 0.7}`
-- Scheduler patience: 5; minimum learning rate: `1e-6`
-- Sweep: seed 0, 60 epochs, **validation-only model selection**
-- Final: selected hyperparameters, seeds 0–4, 150 epochs; test only after
+- Scheduler: `none` (fixed learning rate; factor irrelevant) OR `plateau` (`ReduceLROnPlateau`, factor in `{0.2, 0.3, 0.5, 0.7}`); these are **five** distinct scheduler choices, not eight
+- When `scheduler=plateau`: patience 5; minimum learning rate `1e-6`
+- Sweep: seed 0, 200 epochs, **validation-only model selection**
+- Final: selected hyperparameters, seeds 0–4, 500 epochs; test only after
   selecting the best epoch on validation
 - `SWEEP_EPOCHS`, `FINAL_EPOCHS`, `REP_DIM`, `OUT_DIR`, and
   `DATA_ROOT` are environmental overrides.
 
 The output is a per-experiment `summary.json`, aggregate
 `sweep_results.csv`, `selected_config.json`, and a five-seed summary.
-Completed configurations are skipped on re-run.
+Completed configurations are skipped on re-run. New sweep/final output directories use
+`scheduler200` / `scheduler500` in their names so older 60/150-epoch outputs
+cannot be mistaken for completed 200/500-epoch experiments.
 
 **Probe-count interpretation:** ProbeX has one first-order view per probe;
 MVProbe computes *four* weight-space views. `n_probes` is therefore not a
