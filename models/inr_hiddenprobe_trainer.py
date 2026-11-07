@@ -288,7 +288,7 @@ class SetTransformerHead(nn.Module):
         B = A.shape[0]; A = A[..., 0].reshape(B, NP, s.L, H)     # [B,NP,L,H]
         z = A.permute(0, 2, 3, 1)                                # [B,L,H,NP] each (l,h) = its NP-profile
         z = s.in_proj(s._feats(z))                              # [B,L,H,d]
-        z = z + s.layer_emb(torch.tensor(SELECTED_HIDDEN_LAYER_IDS, device=A.device))[None, :, None, :]   # original layer IDs
+        z = z + s.layer_emb(torch.tensor(SELECTED_HIDDEN_LAYER_IDS, device=A.device, dtype=torch.long))[None, :, None, :]   # original layer IDs
         tokens = z.reshape(B, s.L * H, -1)                      # [B, L*H, d]  (unordered neuron set)
         yt = s.y_proj(f.reshape(B, -1)).unsqueeze(1)            # [B,1,d]
         if s.readout == "pma":                                 # pool L*H+1 tokens with K learned seed queries
