@@ -209,6 +209,8 @@ def main():
     ap.add_argument("--plateau_min_lr", type=float, default=1e-6)
     ap.add_argument("--weight_decay", type=float, default=1e-5)
     ap.add_argument("--batch_size", type=int, default=128)
+    ap.add_argument("--early_stop_patience", type=int, default=0,
+                    help="Stop after this many epochs without strict validation improvement; 0 disables")
     ap.add_argument("--epochs", type=int, default=60)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--num_workers", type=int, default=0)
@@ -293,6 +295,10 @@ def main():
     best_val_loss = float("inf")
     best_epoch = 0
     best_state = None
+    no_improvement_epochs = 0
+    early_stopped = False
+    if args.early_stop_patience < 0:
+        raise ValueError("--early_stop_patience must be >= 0")
     start = time.time()
 
     for epoch in range(1, args.epochs + 1):
@@ -319,6 +325,9 @@ def main():
             best_val_loss = val["loss"]
             best_epoch = epoch
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            no_improvement_epochs = 0
+        else:
+            no_improvement_epochs += 1
 
         elapsed = time.time() - start
         per_epoch = elapsed / epoch
@@ -333,6 +342,16 @@ def main():
             remaining=per_epoch * max(0, args.epochs - epoch),
             new_best=is_best,
         )
+        if args.early_stop_patience and no_improvement_epochs >= args.early_stop_patience:
+            early_stopped = True
+            print(
+                f"[EARLY-STOP] {args.model_variant} epoch={epoch} "
+                f"best_epoch={best_epoch} "
+                f"no_validation_improvement={no_improvement_epochs} "
+                f"patience={args.early_stop_patience}",
+                flush=True,
+            )
+            break
 
     if best_state is None:
         raise RuntimeError("No validation checkpoint was selected")
@@ -357,6 +376,9 @@ def main():
         "plateau_patience": args.plateau_patience,
         "plateau_min_lr": args.plateau_min_lr,
         "epochs": args.epochs,
+        "epochs_run": epoch,
+        "early_stop_patience": args.early_stop_patience,
+        "early_stopped": early_stopped,
         "params": total_params,
         "best_val_acc": best_val_acc,
         "best_val_loss": best_val_loss,
