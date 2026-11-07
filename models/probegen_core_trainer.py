@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from scipy.stats import kendalltau
 
 from models.probegen_core import ProbeGen
+from models.hidden_layer_selection import parse_bool_argument
 from models.logging_utils import print_run_config, print_eval, print_seed_result, print_final_summary
 from models.eval_benchmark import timed_eval, save_benchmark
 from data_probegen import CIFAR10INRDataset, INRDataset, CachedCNNParkDataset
@@ -427,6 +428,14 @@ parser.add_argument(
     default="standard",
     choices=["standard", "inductive"],
 )
+parser.add_argument(
+    "--include_hidden_features", type=parse_bool_argument, default=None,
+    help="For HiddenProbe, include hidden activations (default true); for ProbeGen default false.",
+)
+parser.add_argument(
+    "--hidden_layer_ids", nargs="+", default=None, metavar="ID",
+    help="Zero-based hidden layer IDs, e.g. 0, 1, 0 1 or 0,1. Default None means all when included.",
+)
 parser.add_argument("--r_per_hidden", type=int, default=2)
 parser.add_argument("--rank", type=int, default=8)
 
@@ -469,13 +478,15 @@ args = parser.parse_args()
 if args.probe_lr == 0:
     args.probe_lr = args.lr
 
-# The method selects the model semantics in this backend. ProbeGen is always
-# output-only. HiddenProbe is supported here only for MNIST/FMNIST classification
-# and always enables hidden features.
+# Preserve canonical defaults: ProbeGen is output-only, while HiddenProbe
+# uses all hidden layers unless --include_hidden_features=false was specified.
 if args.method == "probegen":
+    if args.include_hidden_features is True:
+        raise ValueError("ProbeGen is output-only; use --method hiddenprobe for hidden features.")
     args.include_hidden_features = False
 elif args.task == "classification" and args.dataset in {"mnist", "fmnist"}:
-    args.include_hidden_features = True
+    if args.include_hidden_features is None:
+        args.include_hidden_features = True
 else:
     raise ValueError(
         "This backend supports method=hiddenprobe only for classification "
@@ -900,6 +911,7 @@ def run_one_seed(args, seed, exp_dir):
         per_probe_out_dim=args.per_probe_out_dim,
         per_probe_init=args.per_probe_init,
         n_hidden_target_layers=ds["n_hidden_target_layers"],
+        hidden_layer_ids=args.hidden_layer_ids,
         r_per_hidden=args.r_per_hidden,
         rank=args.rank,
         seed=seed,
@@ -936,6 +948,8 @@ def run_one_seed(args, seed, exp_dir):
         "include_hidden_features": (
             args.include_hidden_features if task == "classification" else False
         ),
+        "requested_hidden_layer_ids": args.hidden_layer_ids,
+        "hidden_layer_ids": list(model.hidden_layer_ids),
         "models_c_in": ds["models_c_in"],
         "models_c_out": ds["models_c_out"],
         "d_out": ds["d_out"],
