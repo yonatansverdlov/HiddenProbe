@@ -24,8 +24,8 @@ FINAL_EPOCHS="${FINAL_EPOCHS:-500}"
 [[ -d "$DATA_DIR" ]] || { echo "Missing $DATA_DIR" >&2; exit 2; }
 [[ -s "$SPLIT" ]] || { echo "Missing $SPLIT" >&2; exit 2; }
 
-SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_fmnist_inr_sweep_scheduler200_s0"
-FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_fmnist_inr_best_scheduler500"
+SWEEP_ROOT="${OUT_DIR:-checkpoints}/mvprobe_fmnist_inr_sweep_q128_p128_bs128_es10_s0"
+FINAL_ROOT="${OUT_DIR:-checkpoints}/mvprobe_fmnist_inr_best_q128_p128_bs128_500"
 mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
 is_complete_summary() {
@@ -44,12 +44,12 @@ PY
 
 
 RUN=0
-TOTAL=960
+TOTAL=120
 for LAYER in 0 1; do
-  for N_PROBES in 64 128; do
-    for PROJ_DIM in 64 128; do
+  for N_PROBES in 128; do
+    for PROJ_DIM in 128; do
       for LR in 1e-4 3e-4 5e-4 1e-3; do
-        for BATCH_SIZE in 64 128; do
+        for BATCH_SIZE in 128; do
           for WEIGHT_DECAY in 0 1e-5 1e-4; do
             for SCHED_SPEC in none plateau_0.2 plateau_0.3 plateau_0.5 plateau_0.7; do
               if [[ "$SCHED_SPEC" == "none" ]]; then
@@ -90,6 +90,7 @@ for LAYER in 0 1; do
               --weight_decay "$WEIGHT_DECAY" \
               --batch_size "$BATCH_SIZE" \
               --epochs "$SWEEP_EPOCHS" \
+              --early_stop_patience 10 \
               --seed 0 \
               --device "$DEVICE" \
               --skip_test_eval \
@@ -198,6 +199,7 @@ for SEED in 0 1 2 3 4; do
     --weight_decay "$BEST_WD" \
     --batch_size "$BEST_BS" \
     --epochs "$FINAL_EPOCHS" \
+    --early_stop_patience 0 \
     --seed "$SEED" \
     --device "$DEVICE" \
     --out_dir "$DIR"
