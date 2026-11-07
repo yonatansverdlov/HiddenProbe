@@ -75,6 +75,7 @@ def args_parser():
     p.add_argument("--data-root", type=Path, default=ROOT / "data")
     p.add_argument("--csv", type=Path, default=None)
     p.add_argument("--overwrite", action="store_true", help="Replace an existing CSV")
+    p.add_argument("--dry-run", action="store_true", help="List configurations without running or touching CSV")
     p.add_argument("--_child", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--_method", choices=METHODS, help=argparse.SUPPRESS)
     p.add_argument("--_probes", type=int, help=argparse.SUPPRESS)
@@ -303,6 +304,13 @@ def run_child(a):
 
 
 def run_parent(a):
+    if a.dry_run:
+        for q in a.probes:
+            for method in a.methods:
+                print(f"[dry-run] dataset={a.dataset} method={method} Q={q} "
+                      f"batch={a.batch_size} limit={a.limit or 'full'} "
+                      f"precision={a.precision} output={a.csv}")
+        return
     a.csv.parent.mkdir(parents=True, exist_ok=True)
     completed = set()
     if a.csv.exists() and not a.overwrite:
