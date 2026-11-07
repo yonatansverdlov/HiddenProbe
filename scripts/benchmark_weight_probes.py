@@ -110,7 +110,7 @@ def command_for(dataset: str, method: str, trainer: str, data_root: Path,
         "--seed", "0",
         "--device", device,
         "--skip_test_eval",
-        "--early_stop_patience", "10",
+        "--early_stop_patience", "0",
         "--out_dir", str(output),
     ]
     if dataset == "mnist_transformers":
@@ -172,7 +172,7 @@ def measure(spec: tuple, method: str, data_root: Path, output: Path,
                                          if training_sec is not None else "",
         "estimated_full_sweep_job_hours": round(
             (training_sec if training_sec is not None else wall)
-            * n_configs / 3600, 2
+            * n_configs * 200 / epochs / 3600, 2
         ),
         "log": str(logfile.relative_to(ROOT)) if logfile.is_relative_to(ROOT) else str(logfile),
     }
@@ -194,7 +194,7 @@ def main() -> int:
                         default=[item[0] for item in BENCHMARKS],
                         help="Subset of benchmark datasets; e.g. --datasets fmnist_inr")
     parser.add_argument("--epochs", type=int, default=60,
-                        help="Maximum training epochs per single config (default 60; early-stop patience 10)")
+                        help="Maximum training epochs per single config (default 60; no early stopping)")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--data-root", type=Path,
                         default=Path(os.environ.get("DATA_ROOT", ROOT / "data")))
@@ -246,7 +246,7 @@ def main() -> int:
         print(f"TOTAL: ~{total:.2f} job-hours; "
               f"rough wall-clock at parallel={args.parallel}: "
               f"~{total/args.parallel:.2f} hours.")
-        print("WARNING: Early stopping is enabled. This estimate assumes similar stop epochs, "
+        print("WARNING: Assumes similar per-epoch throughput. "
               "GPU contention, layer sizes, and I/O can change timing.")
     else:
         print("Some jobs failed: inspect their training.log files. "
