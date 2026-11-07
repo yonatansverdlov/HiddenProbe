@@ -11,8 +11,8 @@ Use an allocated CUDA GPU and the existing FMNIST-INR data installation.
 No retraining or downloading is required.
 
 ~~~bash
-# 16/32/64/128/256 probes, both methods, both forward and training-step costs.
-# Defaults to the ENTIRE train split, batch size 32, BF16 and 1 measured pass.
+# 16/32/64/128/256 probes, both methods, eval-mode forward costs.
+# Defaults to the ENTIRE train split, batch size 32, BF16 and 1 measured eval-mode pass.
 python measurments/benchmark_fmnist_inr_probe_cost.py
 
 # Forward-only on the entire Fashion-MNIST INR TRAIN split,
@@ -22,13 +22,16 @@ python measurments/benchmark_fmnist_inr_probe_cost.py --phase forward --limit 0
 # Smaller smoke run or GPU with limited memory:
 python measurments/benchmark_fmnist_inr_probe_cost.py --phase both --limit 32
 
-# More robust timing on the entire train split:
+# Optional training-step cost (forward + backward + Adam) instead of inference:
+python measurments/benchmark_fmnist_inr_probe_cost.py --phase train_step
+
+# More robust inference timing on the entire train split:
 python measurments/benchmark_fmnist_inr_probe_cost.py --repeats 3
 ~~~
 
 Output: measurments/fmnist_inr_probe_cost.csv, written one configuration
-at a time. The default full training split and 5 probe counts x 2 methods x 2 phases give 20 rows.
-Using --phase forward gives the 10-row comparison.
+at a time. The default full training split and 5 probe counts x 2 methods x 1 phase give 10 rows.
+Using --phase both gives 20 rows.
 
 ### What the measurements mean
 
@@ -39,6 +42,8 @@ Using --phase forward gives the 10-row comparison.
   The probes and prediction model are already on GPU.
 - data_load_s: time reading/building target networks from CPU checkpoints.
   Keep this separate from compute; filesystem cache may alter it.
+- end_to_end_s: model setup plus the full measured data-loading, transfer,
+  compute, and cleanup wall time, excluding warmup.
 - compute_ms_per_network: model compute time divided by the number of target
   INRs and passes. Useful for cross-Q and cross-method comparisons.
 - cuda_peak_allocated_mib: peak live PyTorch GPU allocation while
