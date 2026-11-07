@@ -13,7 +13,7 @@ Each (method, Q, phase) is launched in a fresh Python process to prevent
 allocator state from leaking across comparisons. This is a cost benchmark:
 randomly initialized predictors, no accuracy reporting or training to convergence.
 
-Default: entire FMNIST-INR training split, one measured pass, both forward and train-step.
+Default: entire FMNIST-INR training split, one measured eval-mode forward pass.
 Pass --limit 32 for a quick smoke test, or --phase forward to match
 the forward-only historical MNIST-INR timing benchmark.
 
@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--probes", type=int, nargs="+", default=list(Q_VALUES))
     ap.add_argument("--methods", choices=METHODS, nargs="+", default=list(METHODS))
-    ap.add_argument("--phase", choices=("forward", "train_step", "both"), default="both")
+    ap.add_argument("--phase", choices=("forward", "train_step", "both"), default="forward")
     ap.add_argument("--limit", type=int, default=0,
                     help="Number of training INRs (0 = entire train split; default 0).")
     ap.add_argument("--batch-size", type=int, default=32)
