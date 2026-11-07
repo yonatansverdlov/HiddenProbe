@@ -23,14 +23,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BENCHMARKS = (
-    ("mnist_transformers", "MNIST-Transformers", 1728, "regression",
+    ("mnist_transformers", "MNIST-Transformers", 2880, "regression",
      "models/mvprobe_transformer_trainer.py"),
-    ("svhn", "SVHN", 864, "regression", "models/mvprobe_svhn_trainer.py"),
-    ("mnist_regression", "MNIST regression", 864, "regression",
+    ("svhn", "SVHN", 1440, "regression", "models/mvprobe_svhn_trainer.py"),
+    ("mnist_regression", "MNIST regression", 1440, "regression",
      "models/mvprobe_svhn_trainer.py"),
-    ("fmnist", "FMNIST INR", 576, "classification",
+    ("fmnist", "FMNIST INR", 960, "classification",
      "models/mvprobe_inr_trainer.py"),
-    ("cifar10", "CIFAR-10 INR", 576, "classification",
+    ("cifar10", "CIFAR-10 INR", 960, "classification",
      "models/mvprobe_inr_trainer.py"),
 )
 
@@ -171,7 +171,7 @@ def measure(spec: tuple, method: str, data_root: Path, output: Path,
                                          if training_sec is not None else "",
         "estimated_full_sweep_job_hours": round(
             (training_sec if training_sec is not None else wall)
-            * n_configs * 60 / epochs / 3600, 2
+            * n_configs * 200 / epochs / 3600, 2
         ),
         "log": str(logfile.relative_to(ROOT)) if logfile.is_relative_to(ROOT) else str(logfile),
     }
