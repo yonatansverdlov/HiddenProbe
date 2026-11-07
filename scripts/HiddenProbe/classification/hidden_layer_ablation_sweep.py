@@ -2,8 +2,8 @@
 """Validation-based sweep + 5-seed evaluation for one HiddenProbe INR layer.
 
 Invoked by the four run_*_layer{0,1}_sweep.sh wrappers.
-FMNIST: 24 plateau configs, 20 sweep epochs, 30 final epochs.
-CIFAR-10 non-aug: 24 plateau + 3 cosine configs, 20 sweep epochs,
+FMNIST: 24 plateau + 3 cosine configs, 20 sweep epochs, 30 final epochs.
+CIFAR-10 non-aug: the same 27-config grid, 20 sweep epochs,
 60 final epochs to match run_cifar10_inr_nonaug.sh.
 
 The two training backends retain their respective model architectures.
@@ -57,8 +57,7 @@ def configs(dataset: str) -> list[Config]:
         Config(lr, "plateau", patience, factor)
         for lr, patience, factor in itertools.product(LRS, PATIENCES, FACTORS)
     ]
-    if dataset == "cifar10":
-        result.extend(Config(lr, "cosine") for lr in LRS)
+    result.extend(Config(lr, "cosine") for lr in LRS)
     return result
 
 
