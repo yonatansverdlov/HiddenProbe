@@ -77,3 +77,73 @@ before comparing equal-accuracy configurations.
   excludes those setup costs.
 
 The historical measurements did not record GPU peak-memory statistics.
+
+
+## Figure-3 cost sweeps: SVHN, MNIST-Transformers and CIFAR10-WP
+
+These are **standalone inference-cost benchmarks**, complementary to the
+accuracy-vs-probe-count experiments. The FMNIST-INR cost sweep above is
+unchanged. For each of the other three tasks, both methods run on the same
+canonical **TRAIN** target models with `Q={16,32,64,128,256}`, in isolated
+processes (10 configurations per task). Each run writes one CSV row immediately
+and a rerun skips existing rows with matching settings.
+
+```bash
+# Full train splits; Eval mode, FP32, batch size 32, 2 warmup batches,
+# one measured pass. Requires an allocated CUDA GPU and existing caches.
+bash measurments/run_svhn_probe_cost.sh
+bash measurments/run_mnist_transformer_probe_cost.sh
+bash measurments/run_cifar10_wp_probe_cost.sh
+
+# Quick sanity check, without wiping existing full-run results:
+bash measurments/run_svhn_probe_cost.sh --limit 32 --csv /tmp/svhn_probe_cost_smoke.csv
+
+# Three measured passes for more stable compute times (new output file):
+bash measurments/run_mnist_transformer_probe_cost.sh --repeats 3 \
+  --csv measurments/mnist_transformer_probe_cost_3passes.csv
+```
+
+Results:
+- `measurments/svhn_probe_cost.csv`
+- `measurments/mnist_transformer_probe_cost.csv`
+- `measurments/cifar10_wp_probe_cost.csv`
+
+Common implementation: `measurments/benchmark_other_probe_cost.py`.
+The `--probes`, `--methods`, `--limit`, `--batch-size`, `--precision`,
+`--warmup`, `--repeats`, `--seed`, `--data-root`, `--device`,
+`--csv` flags are available. `--overwrite` explicitly resets the selected
+CSV. Without it, existing results are never overwritten. Use a distinct CSV
+name for smoke tests or different settings.
+
+**Definitions and limitations**
+
+- `model_compute_s` = GPU-synchronized forward for all target models; does
+  not include batch CPU->GPU transfers. `compute_ms_per_network` is normalized
+  by target model count and repetitions.
+- `target_transfer_s` = all current-target transfers CPU->GPU.
+- `data_load_s` = one-time load and CPU reconstruction of the canonical
+  target network population. `model_setup_s` = predictor construction and
+  placement on GPU.
+- `end_to_end_s` = CPU data load + predictor setup + measured full pass wall
+  time (forward, transfers, cleanup). Warmup and subprocess startup excluded.
+- `cuda_peak_allocated_mib` and `cuda_peak_reserved_mib` are PyTorch CUDA
+  allocator metrics, **not** the whole device's `nvidia-smi` utilization.
+- Target CNNs are CPU-resident between batches for **both** methods to avoid
+  unfairly counting an entire zoo as HiddenProbe's inference memory. For the
+  Transformer benchmark, target parameter dictionaries are also moved to GPU
+  only for the current batch. Thus costs do **not** match the complete training
+  pipeline's original GPU-resident SVHN HiddenProbe implementation.
+- Default **FP32** provides a controlled same-precision comparison, like
+  FMNIST. The SVHN/WP HiddenProbe original CNN trainer uses BF16 autocast,
+  whereas core ProbeGen and the Transformer trainer use FP32. An optional
+  `--precision bf16` measures both methods with BF16 on a capable GPU.
+- These are **randomly initialized model inference benchmarks**, not trained
+  checkpoint evaluations. No accuracy or test metrics are produced. Pair them
+  with the separate probe-count experiments before making any performance-per-
+  cost claim. CIFAR10-WP is not part of `probe_count_5seeds.py` in this repo:
+  there is no five-seed Q-sweep accuracy result for it from that script.
+- Use the same GPU and keep it otherwise idle when comparing methods/Q.
+- Data must already exist. For the Transformer cache, run
+  `python main.py transformer cache --dataset mnist --seed 0 --cut_off 0 --data_root data`;
+  for other datasets, use their existing `scripts/setup_data/regression_*.sh`
+  setup scripts. This benchmark never downloads or modifies datasets.
