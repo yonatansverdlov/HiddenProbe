@@ -18,6 +18,7 @@ import argparse, os, time, json, random, subprocess, sys, torch, torch.nn as nn,
 import numpy as np
 from models.probegen_h import ProbeGenH
 from models.logging_utils import print_run_config, print_eval, print_seed_result
+from models.eval_benchmark import timed_eval, save_benchmark
 from data import load_cnns, DEFAULT_SPLITS
 from models.metrics_cnn import acc_to_logit, all_metrics
 
@@ -525,7 +526,28 @@ if args.skip_test_eval:
     args.dump_preds = ""
 else:
     # TEST IS TOUCHED EXACTLY ONCE in the normal training protocol.
-    ft, test_pred = ev(teN, teY, return_preds=True)
+    if os.environ.get("PROBE_COUNT_PROFILE") == "1":
+        # The saved best configs use different training/validation batch sizes.
+        # Benchmark TEST for both SVHN methods with the same batch size (64).
+        args.eval_cnn_bs = int(os.environ.get("PROBE_COUNT_EVAL_BS", "64"))
+        if args.eval_cnn_bs < 1:
+            raise ValueError("PROBE_COUNT_EVAL_BS must be >= 1")
+        # Training is finished. Free Adam moments for a cleaner inference baseline.
+        opt.state.clear()
+        (ft, test_pred), eval_profile = timed_eval(
+            lambda: ev(teN, teY, return_preds=True),
+            n_examples=len(teN), device=DEV,
+        )
+        eval_profile["eval_batch_size"] = args.eval_cnn_bs
+        save_benchmark(
+            args.out_dir, method="hiddenprobe", dataset=dataset_label.lower(),
+            seed=args.seed, n_probes=args.n_out_probes,
+            metric_name="test_tau", metric=ft["tau_b"],
+            train_time_sec=time.time() - _t0,
+            trainable_params=rep["total_trainable"], profile=eval_profile,
+        )
+    else:
+        ft, test_pred = ev(teN, teY, return_preds=True)
 
 # Optional prediction dump reuses the single TEST forward above; it never re-runs TEST.
 if args.dump_preds and ft is not None:

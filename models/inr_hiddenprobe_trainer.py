@@ -27,6 +27,7 @@ sys.path.insert(0, ROOT)   # so data.py and the models/ package import WITHOUT n
 from models.lowrank import make_linear
 from models.probegen_utils import LowRankEncoderLayer, find_hidden_linear_layers, run_with_linear_activation_hooks
 from models.hiddenprobe_probe_source import LearnedProbeSource
+from models.hidden_layer_selection import parse_bool_argument, resolve_hidden_layer_ids
 from models.logging_utils import print_run_config, print_eval, print_seed_result
 from data import INRDataset
 
@@ -39,6 +40,14 @@ ap.add_argument("--splits", default="cifar10_splits_multiview", help="splits pre
 ap.add_argument("--L", type=int, default=4, help="# hidden layers of the target INR")
 ap.add_argument("--H", type=int, default=32, help="hidden width of the target INR")
 ap.add_argument("--out_dim", type=int, default=3, help="target INR output dim (fmnist=1, cifar=3)")
+ap.add_argument(
+    "--include_hidden_features", type=parse_bool_argument, default=True,
+    help="Whether to include hidden activations (default true); false uses output only.",
+)
+ap.add_argument(
+    "--hidden_layer_ids", nargs="+", default=None, metavar="ID",
+    help="Zero-based hidden layer IDs, e.g. 0, 1, 0 1 or 0,1. Default None selects all if included.",
+)
 ap.add_argument("--n_classes", type=int, default=10)
 ap.add_argument("--models_c_in", type=int, default=2, help="INR input coord dim (2=image INRs, 3=3D)")
 ap.add_argument("--dataset_dir", default=None, help="root holding the INR checkpoints + splits json "
@@ -99,7 +108,20 @@ args = ap.parse_args()
 if args.probe_lr == 0:
     args.probe_lr = args.lr
 NP = args.n_probes   # override the module default (128) with the CLI value
-DEV = "cuda"; L, H, OUT = args.L, args.H, args.out_dim
+DEV = "cuda"
+TOTAL_HIDDEN_LAYERS = args.L
+SELECTED_HIDDEN_LAYER_IDS = resolve_hidden_layer_ids(
+    args.hidden_layer_ids,
+    TOTAL_HIDDEN_LAYERS,
+    args.include_hidden_features,
+)
+L, H, OUT = len(SELECTED_HIDDEN_LAYER_IDS), args.H, args.out_dim
+print(
+    f"[HIDDEN LAYERS] include={args.include_hidden_features} "
+    f"requested={args.hidden_layer_ids} selected={list(SELECTED_HIDDEN_LAYER_IDS)} "
+    f"out_of={TOTAL_HIDDEN_LAYERS}",
+    flush=True,
+)
 DS_DIR = args.dataset_dir or os.path.join(ROOT, "experiments", "inr_classification", "dataset")
 SPLITS_JSON = args.splits if args.splits.endswith(".json") else args.splits + ".json"
 RUNS_DIR = args.runs_dir or os.path.join(ROOT, "experiments", args.dataset, "runs")
@@ -131,8 +153,9 @@ def _capture_pre_activations(net, x):
     still flow from the HiddenProbe loss through the frozen target INR to x and
     therefore into the learned probe generator.
     """
-    hidden_layers = find_hidden_linear_layers(net, expected_count=L)
-    y, acts = run_with_linear_activation_hooks(net, x, hidden_layers)
+    all_hidden_layers = find_hidden_linear_layers(net, expected_count=TOTAL_HIDDEN_LAYERS)
+    selected_layers = [all_hidden_layers[index] for index in SELECTED_HIDDEN_LAYER_IDS]
+    y, acts = run_with_linear_activation_hooks(net, x, selected_layers)
     return acts, y
 PROBE_MOD = PM.probe_source
 n_probe_params = sum(p.numel() for p in PROBE_MOD.parameters() if p.requires_grad)
@@ -154,7 +177,7 @@ def capture_batch(nets_b, x):
     Al, fl = [], []
     for net in nets_b:
         acts, y = _capture_pre_activations(net, x)   # grad: loss->acts->net(x)->x->generator
-        Al.append(torch.cat(acts, dim=-1)); fl.append(y)
+        Al.append(torch.cat(acts, dim=-1) if acts else y.new_empty((y.shape[0], 0))); fl.append(y)
     A = torch.stack(Al, 0).unsqueeze(-1)                     # [B,NP,L*H,1]
     f = torch.stack(fl, 0)                                   # [B,NP,OUT]
     return A, f
@@ -192,7 +215,7 @@ class NeuronProfileNet(nn.Module):   # neuron-profile head (probe-based; pre + p
             s.pool_q = nn.Parameter(torch.randn(d) * (1.0 / d) ** 0.5); s.pool_scale = 1.0 / math.sqrt(d)
         if cross_layer:
             s.xnorm = nn.LayerNorm(d); s.xlayer = _LowRankSelfAttn(d, xlayer_rank)
-        s.layer_emb = nn.Embedding(L, d)
+        s.layer_emb = nn.Embedding(TOTAL_HIDDEN_LAYERS, d)
         s.y_proj = make_linear(NP*out, d, rank=rank)
         s.head = nn.Sequential(make_linear((L+1)*d, d, rank=rank), nn.ReLU(), make_linear(d, d, rank=rank), nn.ReLU(), make_linear(d, nclass, rank=rank))
     def _pool(s, z):                                     # z [B,H,d] -> [B,d]
@@ -212,11 +235,15 @@ class NeuronProfileNet(nn.Module):   # neuron-profile head (probe-based; pre + p
             if s.lr:
                 for lay in s.enc: z = lay(z)
             else: z = s.enc(z)
-            per.append(s._pool(z) + s.layer_emb(torch.tensor(l, device=A.device)))
-        lt = torch.stack(per, dim=1)                      # [B,L,d]
-        if s.cross_layer:
-            lt = lt + s.xlayer(s.xnorm(lt))               # mix the L layer-tokens
-        return s.head(torch.cat([lt.reshape(B, s.L * lt.shape[-1]), s.y_proj(f.reshape(B, -1))], -1))
+            per.append(s._pool(z) + s.layer_emb(torch.tensor(SELECTED_HIDDEN_LAYER_IDS[l], device=A.device)))
+        if per:
+            lt = torch.stack(per, dim=1)                 # [B,L,d]
+            if s.cross_layer:
+                lt = lt + s.xlayer(s.xnorm(lt))           # mix selected layer-tokens
+            hidden_vec = lt.reshape(B, s.L * lt.shape[-1])
+        else:
+            hidden_vec = f.new_empty((B, 0))             # output-only mode
+        return s.head(torch.cat([hidden_vec, s.y_proj(f.reshape(B, -1))], -1))
 
 
 class SetTransformerHead(nn.Module):
@@ -232,7 +259,7 @@ class SetTransformerHead(nn.Module):
             s.register_buffer("ffreqs", SIREN_W0 * (2.0 ** torch.linspace(-2.0, 1.0, feat_fourier)))
         in_dim = 2 * NP + s.n_stats + (2 * feat_fourier * NP) + feat_order
         s.in_proj = make_linear(in_dim, d)
-        s.layer_emb = nn.Embedding(L, d)
+        s.layer_emb = nn.Embedding(TOTAL_HIDDEN_LAYERS, d)
         s.y_proj = make_linear(NP * out, d)
         el = nn.TransformerEncoderLayer(d, nheads, 4 * d, dropout, activation="relu", batch_first=True, norm_first=True)
         s.enc = nn.TransformerEncoder(el, nenc)
@@ -261,7 +288,7 @@ class SetTransformerHead(nn.Module):
         B = A.shape[0]; A = A[..., 0].reshape(B, NP, s.L, H)     # [B,NP,L,H]
         z = A.permute(0, 2, 3, 1)                                # [B,L,H,NP] each (l,h) = its NP-profile
         z = s.in_proj(s._feats(z))                              # [B,L,H,d]
-        z = z + s.layer_emb(torch.arange(s.L, device=A.device))[None, :, None, :]   # layer id only
+        z = z + s.layer_emb(torch.tensor(SELECTED_HIDDEN_LAYER_IDS, device=A.device, dtype=torch.long))[None, :, None, :]   # original layer IDs
         tokens = z.reshape(B, s.L * H, -1)                      # [B, L*H, d]  (unordered neuron set)
         yt = s.y_proj(f.reshape(B, -1)).unsqueeze(1)            # [B,1,d]
         if s.readout == "pma":                                 # pool L*H+1 tokens with K learned seed queries
@@ -445,6 +472,9 @@ json.dump(
     {
         "exp": args.exp_name,
         "seed": args.seed,
+        "include_hidden_features": args.include_hidden_features,
+        "requested_hidden_layer_ids": args.hidden_layer_ids,
+        "hidden_layer_ids": list(SELECTED_HIDDEN_LAYER_IDS),
         "best_val_acc": best,
         "best_test_acc": fte,
         "final_val_acc": fva,

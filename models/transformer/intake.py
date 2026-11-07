@@ -14,6 +14,8 @@ import os, re, glob, json, hashlib, random
 from typing import Dict, List
 import torch
 
+from models.progress import show_progress
+
 # <run_id>_<epoch>_<acc>.pt  — epoch-75 with a numeric accuracy
 EP75_RE = re.compile(r"^([0-9a-z]+)_75_(\d+)\.pt$")
 # dataset -> the extracted wrapper dir (glob recursively beneath it, robust to the nested subdirs)
@@ -106,15 +108,21 @@ def load_target(path: str, device="cpu") -> Dict[str, torch.Tensor]:
     return out
 
 
-def load_zoo(manifest: List[Dict], split: str, device="cpu", limit: int = 0) -> List[Dict]:
+def load_zoo(manifest: List[Dict], split: str, device="cpu", limit: int = 0,
+             progress: bool = False) -> List[Dict]:
     """Load all (or `limit`) targets of a split into memory: [{id, params, label}]."""
     recs = [r for r in manifest if r["split"] == split and r["integrity_status"] == "ok"]
     if limit:
         recs = recs[:limit]
     zoo = []
-    for r in recs:
+    label = f"Transformer cache ({split})"
+    if progress:
+        show_progress(label, 0, len(recs))
+    for i, r in enumerate(recs, 1):
         zoo.append({"id": r["run_id"], "params": load_target(r["checkpoint_path"], device),
                     "label": r["normalized_accuracy"]})
+        if progress:
+            show_progress(label, i, len(recs))
     return zoo
 
 
@@ -137,8 +145,9 @@ def build_cache(root: str, dataset: str, seed: int = 0, cut_off: float = 0.0,
     for split in ("train", "val", "test"):
         path = cache_path(root, dataset, split, seed, cut_off=cut_off)
         if os.path.exists(path) and not overwrite:
+            print(f"[setup] Transformer cache ({split}): already exists", flush=True)
             counts[split] = "exists"; continue
-        zoo = load_zoo(man, split)                                     # the slow per-file load, done ONCE
+        zoo = load_zoo(man, split, progress=True)                       # per-file load, done ONCE
         torch.save({
             "dataset": dataset,
             "split": split,

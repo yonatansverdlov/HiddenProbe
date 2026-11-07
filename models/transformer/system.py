@@ -60,7 +60,11 @@ class LearnedSystem(nn.Module):
             bad = []
             if cfg.dataset not in CT_GEOMETRIES: bad.append(f"dataset={cfg.dataset} (supported: {list(CT_GEOMETRIES)})")
             if cfg.generator != "g3": bad.append(f"generator={cfg.generator} (needs the shared unconditioned g3)")
-            if cfg.n_probes != CT_N_PROBES: bad.append(f"n_probes={cfg.n_probes} (needs {CT_N_PROBES})")
+            if cfg.dataset == "mnist":
+                if cfg.n_probes not in (16, 32, 64, 128, 256):
+                    bad.append(f"n_probes={cfg.n_probes} (MNIST supports 16,32,64,128,256)")
+            elif cfg.n_probes != CT_N_PROBES:
+                bad.append(f"n_probes={cfg.n_probes} (needs {CT_N_PROBES})")
             if cfg.n_classes != CT_GEOMETRIES.get(cfg.dataset, CT_GEOMETRIES["mnist"]).n_classes:
                 bad.append(f"n_classes={cfg.n_classes} (dataset {cfg.dataset} logits)")
             if cfg.dataset == "mnist" and cfg.ffn != CT_FFN: bad.append(f"ffn={cfg.ffn} (mnist: fixed {CT_FFN}; no auto-fit)")
