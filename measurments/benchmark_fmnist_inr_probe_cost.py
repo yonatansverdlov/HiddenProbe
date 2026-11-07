@@ -73,7 +73,7 @@ def parse_args() -> argparse.Namespace:
                     help="Warmup steps on the first batch, excluded from timing.")
     ap.add_argument("--repeats", type=int, default=1, help="Measured passes through the chosen INRs.")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--precision", choices=("bf16", "fp32"), default="bf16")
+    ap.add_argument("--precision", choices=("bf16", "fp32"), default="fp32")
     ap.add_argument("--device", default="cuda", help="Use cuda to measure GPU memory.")
     ap.add_argument("--data-dir", type=Path, default=DEFAULT_DATA)
     ap.add_argument("--split-file", type=Path, default=DEFAULT_SPLIT)
