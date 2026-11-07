@@ -9,10 +9,12 @@ The new Fashion-MNIST INR benchmark uses only the current repository code.
 
 Use an allocated CUDA GPU and the existing FMNIST-INR data installation.
 No retraining or downloading is required.
+The original FMNIST INR trainer uses FP32 (no autocast); this benchmark
+therefore defaults to FP32. The historical MNIST benchmark used BF16.
 
 ~~~bash
 # 16/32/64/128/256 probes, both methods, eval-mode forward costs.
-# Defaults to the ENTIRE train split, batch size 32, BF16 and 1 measured eval-mode pass.
+# Defaults to the ENTIRE train split, batch size 32, FP32 and 1 measured eval-mode pass.
 python measurments/benchmark_fmnist_inr_probe_cost.py
 
 # Forward-only on the entire Fashion-MNIST INR TRAIN split,
