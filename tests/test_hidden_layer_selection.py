@@ -3,6 +3,7 @@
 Run from the repository root:
     python -m unittest discover -s tests -p test_hidden_layer_selection.py
 """
+import argparse
 import unittest
 
 from models.hidden_layer_selection import parse_bool_argument, resolve_hidden_layer_ids
@@ -39,7 +40,7 @@ class HiddenLayerSelectionTests(unittest.TestCase):
             self.assertTrue(parse_bool_argument(value))
         for value in (False, "0", "no", "FALSE", "off"):
             self.assertFalse(parse_bool_argument(value))
-        with self.assertRaises(ValueError):
+        with self.assertRaises(argparse.ArgumentTypeError):
             parse_bool_argument("maybe")
 
 
