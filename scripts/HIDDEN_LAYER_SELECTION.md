@@ -97,12 +97,12 @@ They share the implementation in
 Unfinished configurations are rerun; completed ones are skipped.
 
 - **FMNIST**: 3 learning rates `{3e-4,5e-4,7e-4}` ×
-  2 Plateau patiences `{3,5}` × 4 factors `{0.2,0.3,0.5,0.7}` =
-  **24 configs per layer**. Sweep: seed 0, 20 epochs; final: seeds 0–4,
-  30 epochs. Uses the FMNIST HiddenProbe MLP head, batch size 64,
+  (2 Plateau patiences `{3,5}` × 4 factors `{0.2,0.3,0.5,0.7}`,
+  plus one cosine schedule) = **27 configs per layer**. Sweep: seed 0,
+  20 epochs; final: seeds 0–4, 30 epochs. Uses the FMNIST HiddenProbe MLP head, batch size 64,
   128 probes and the dataset's existing model settings.
-- **CIFAR-10 non-augmented**: the same 24 Plateau combinations plus
-  3 cosine schedules, one per learning rate = **27 configs per layer**.
+- **CIFAR-10 non-augmented**: exactly the same 27 hyperparameter
+  configurations (24 Plateau + 3 cosine), evaluated independently.
   Sweep: seed 0, 20 epochs; final: seeds 0–4, **60 epochs** to match
   the currently checked-in CIFAR-10 HiddenProbe baseline runner
   (the earlier paper description used 30 final epochs).
@@ -122,7 +122,7 @@ Each sweep produces `sweep_results.csv` and `selected_config.json`;
 the final phase produces `five_seeds.csv` and `summary.json`.
 
 ```bash
-# Preview the 24 or 27 configs and commands without running training:
+# Preview the 27 configs and commands without running training:
 bash scripts/HiddenProbe/classification/run_fmnist_inr_layer0_sweep.sh --dry-run
 
 # Optional overrides (defaults are 20, 30/60, 5):
