@@ -4,8 +4,8 @@ set -euo pipefail
 # ProbeX on the existing MNIST-Transformers model zoo.
 #
 # Stage 1 (seed 0, validation only):
-#   6 selected transformer weight matrices x 2 n_probes x 2 proj_dim x 4 learning rates
-#   x 2 batch sizes x 3 weight decays x 5 scheduler settings = 1440 configs.
+#   6 selected transformer weight matrices x 1 n_probes x 1 proj_dim x 4 learning rates
+#   x 1 batch size x 3 weight decays x 5 scheduler settings = 180 configs.
 #   200 epochs each by default; the held-out test split is never instantiated or evaluated.
 #   Scheduler: ReduceLROnPlateau on validation metric.
 #
@@ -40,8 +40,8 @@ DEVICE="${DEVICE:-cuda}"
 PLATEAU_PATIENCE="${PLATEAU_PATIENCE:-5}"
 PLATEAU_MIN_LR="${PLATEAU_MIN_LR:-1e-6}"
 
-SWEEP_ROOT="${OUT_DIR:-checkpoints}/probex_mnist_transformers_sweep_scheduler200_s0"
-FINAL_ROOT="${OUT_DIR:-checkpoints}/probex_mnist_transformers_best_scheduler500"
+SWEEP_ROOT="${OUT_DIR:-checkpoints}/probex_mnist_transformers_sweep_q128_p128_bs128_es10_s0"
+FINAL_ROOT="${OUT_DIR:-checkpoints}/probex_mnist_transformers_best_q128_p128_bs128_500"
 mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
 is_complete_summary() {
@@ -60,12 +60,12 @@ PY
 
 
 RUN=0
-TOTAL=2880
+TOTAL=360
 for LAYER in 0 1 2 3 4 5; do
-  for N_PROBES in 64 128; do
-    for PROJ_DIM in 64 128; do
+  for N_PROBES in 128; do
+    for PROJ_DIM in 128; do
       for LR in 1e-4 3e-4 5e-4 1e-3; do
-        for BATCH_SIZE in 64 128; do
+        for BATCH_SIZE in 128; do
           for WEIGHT_DECAY in 0 1e-5 1e-4; do
             for SCHED_SPEC in none plateau_0.2 plateau_0.3 plateau_0.5 plateau_0.7; do
               if [[ "$SCHED_SPEC" == "none" ]]; then
@@ -103,6 +103,7 @@ for LAYER in 0 1 2 3 4 5; do
               --weight_decay "$WEIGHT_DECAY" \
               --batch_size "$BATCH_SIZE" \
               --epochs "$SWEEP_EPOCHS" \
+              --early_stop_patience 10 \
               --seed 0 \
               --device "$DEVICE" \
               --skip_test_eval \
@@ -142,7 +143,7 @@ for path in root.glob("*/summary.json"):
         "params": int(s["params"]),
     })
 
-if len(rows) != 2880:
+if len(rows) != 360:
     raise RuntimeError(f"Expected 1728 completed sweep configs, found {len(rows)}")
 
 rows.sort(key=lambda r: r["best_val_tau"], reverse=True)
@@ -207,6 +208,7 @@ for SEED in 0 1 2 3 4; do
     --weight_decay "$BEST_WD" \
     --batch_size "$BEST_BS" \
     --epochs "$FINAL_EPOCHS" \
+    --early_stop_patience 0 \
     --seed "$SEED" \
     --device "$DEVICE" \
     --out_dir "$DIR"
