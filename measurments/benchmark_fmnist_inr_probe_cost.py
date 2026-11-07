@@ -4,7 +4,9 @@
 Measures separately:
   - model forward (or one forward+backward+optimizer step), synchronized CUDA time;
   - frozen target-INR CPU->GPU transfer time;
-  - peak PyTorch GPU memory allocated and reserved during the measured pass.
+  - peak PyTorch GPU memory allocated and reserved during the measured pass;
+  - end-to-end time (setup + data loading + transfers + computation + cleanup)
+    excluding the optional warmup.
 
 All methods use the same *frozen* Fashion-MNIST INR targets and a batch size of 32.
 Each (method, Q, phase) is launched in a fresh Python process to prevent
@@ -52,7 +54,8 @@ CSV_COLUMNS = (
     "method", "probes", "phase", "dataset", "split", "num_models", "batch_size",
     "seed", "precision", "device", "gpu", "params", "trainable_params",
     "repeats", "warmup_batches", "data_load_s", "target_transfer_s",
-    "model_compute_s", "compute_ms_per_network", "cuda_peak_allocated_mib",
+    "model_compute_s", "compute_ms_per_network", "model_setup_s",
+    "measured_pass_wall_s", "end_to_end_s", "cuda_peak_allocated_mib",
     "cuda_peak_reserved_mib",
 )
 
@@ -136,6 +139,7 @@ def run_child(args: argparse.Namespace) -> dict:
     torch.manual_seed(args.seed)
     if device.type == "cuda":
         torch.cuda.manual_seed_all(args.seed)
+    setup_t0 = time.perf_counter()
     ds = INRDataset(dataset_dir=args.data_dir, splits_path=args.split_file, split="train")
     n = len(ds) if args.limit == 0 else min(args.limit, len(ds))
     if n < 1:
@@ -146,6 +150,8 @@ def run_child(args: argparse.Namespace) -> dict:
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     optimizer = torch.optim.Adam(model.parameters(), lr=3e-4) if phase == "train_step" else None
     use_bf16 = device.type == "cuda" and args.precision == "bf16"
+    sync(device)
+    model_setup_s = time.perf_counter() - setup_t0
 
     def load_batch(start: int) -> tuple[list, torch.Tensor, float]:
         t0 = time.perf_counter()
@@ -204,6 +210,8 @@ def run_child(args: argparse.Namespace) -> dict:
         torch.cuda.reset_peak_memory_stats(device)
 
     data_s, transfer_s, compute_s = 0.0, 0.0, 0.0
+    sync(device)
+    measured_t0 = time.perf_counter()
     for rep in range(args.repeats):
         for start in range(0, n, args.batch_size):
             nets, labels, data_elapsed = load_batch(start)
@@ -214,6 +222,9 @@ def run_child(args: argparse.Namespace) -> dict:
             del nets, labels
         print(f"  {method} Q={q:3d} {phase}: repeat {rep + 1}/{args.repeats} completed",
               flush=True)
+
+    sync(device)
+    measured_pass_wall_s = time.perf_counter() - measured_t0
 
     peak_alloc = (torch.cuda.max_memory_allocated(device) / 2**20
                   if device.type == "cuda" else None)
@@ -231,6 +242,9 @@ def run_child(args: argparse.Namespace) -> dict:
         data_load_s=round(data_s, 5), target_transfer_s=round(transfer_s, 5),
         model_compute_s=round(compute_s, 5),
         compute_ms_per_network=round(1000 * compute_s / (n * args.repeats), 6),
+        model_setup_s=round(model_setup_s, 5),
+        measured_pass_wall_s=round(measured_pass_wall_s, 5),
+        end_to_end_s=round(model_setup_s + measured_pass_wall_s, 5),
         cuda_peak_allocated_mib=round(peak_alloc, 2) if peak_alloc is not None else "",
         cuda_peak_reserved_mib=round(peak_res, 2) if peak_res is not None else "",
     )
@@ -268,6 +282,7 @@ def run_parent(args: argparse.Namespace) -> None:
                 writer.writerow(row)
                 out.flush()  # retain completed configurations if a later one fails
                 print(f"  compute={row['model_compute_s']:.3f}s "
+                      f"end-to-end={row['end_to_end_s']:.3f}s "
                       f"({row['compute_ms_per_network']:.3f}ms/INR), "
                       f"peak allocated={row['cuda_peak_allocated_mib']} MiB, "
                       f"peak reserved={row['cuda_peak_reserved_mib']} MiB", flush=True)
