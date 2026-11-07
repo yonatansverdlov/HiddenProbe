@@ -40,7 +40,7 @@ DEVICE="${DEVICE:-cuda}"
 PLATEAU_PATIENCE="${PLATEAU_PATIENCE:-5}"
 PLATEAU_MIN_LR="${PLATEAU_MIN_LR:-1e-6}"
 
-SWEEP_ROOT="${OUT_DIR:-checkpoints}/probex_mnist_transformers_sweep_q128_p128_bs128_es10_s0"
+SWEEP_ROOT="${OUT_DIR:-checkpoints}/probex_mnist_transformers_sweep_q128_p128_bs128_full200_s0"
 FINAL_ROOT="${OUT_DIR:-checkpoints}/probex_mnist_transformers_best_q128_p128_bs128_500"
 mkdir -p "$SWEEP_ROOT" "$FINAL_ROOT"
 
@@ -103,7 +103,7 @@ for LAYER in 0 1 2 3 4 5; do
               --weight_decay "$WEIGHT_DECAY" \
               --batch_size "$BATCH_SIZE" \
               --epochs "$SWEEP_EPOCHS" \
-              --early_stop_patience 10 \
+              --early_stop_patience 0 \
               --seed 0 \
               --device "$DEVICE" \
               --skip_test_eval \
