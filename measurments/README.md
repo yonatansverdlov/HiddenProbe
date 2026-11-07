@@ -95,6 +95,9 @@ bash measurments/run_svhn_probe_cost.sh
 bash measurments/run_mnist_transformer_probe_cost.sh
 bash measurments/run_cifar10_wp_probe_cost.sh
 
+# Preview all 10 configurations without loading data or touching outputs:
+bash measurments/run_svhn_probe_cost.sh --dry-run
+
 # Quick sanity check, without wiping existing full-run results:
 bash measurments/run_svhn_probe_cost.sh --limit 32 --csv /tmp/svhn_probe_cost_smoke.csv
 
