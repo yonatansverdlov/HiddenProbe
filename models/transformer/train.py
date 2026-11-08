@@ -328,12 +328,12 @@ def _mkcfg(a):
         ffn = a.ffn if a.ffn > 0 else fit_ffn(a.dataset, a.generator, a.n_classes, a.n_probes,
                                               a.readout, a.pma_seeds,
                                               readout_arch=a.readout_arch, stats_bypass=a.stats_bypass,
-                                              token_mlp=a.token_mlp, moments=a.moments, signed_mix=a.signed_mix,
-                     hidden_block_only=a.hidden_block_only)
+                                              token_mlp=a.token_mlp, moments=a.moments, signed_mix=a.signed_mix)
     return TPConfig(a.dataset, a.generator, a.n_classes, ffn, n_probes=a.n_probes,
                     readout=a.readout, pma_seeds=a.pma_seeds, seed=a.seed,
                     readout_arch=a.readout_arch, stats_bypass=a.stats_bypass, dropout=a.dropout, n_slots=a.n_slots,
-                    token_mlp=a.token_mlp, moments=a.moments, signed_mix=a.signed_mix)
+                    token_mlp=a.token_mlp, moments=a.moments, signed_mix=a.signed_mix,
+                    hidden_block_only=a.hidden_block_only)
 
 
 def cmd_count(a):
