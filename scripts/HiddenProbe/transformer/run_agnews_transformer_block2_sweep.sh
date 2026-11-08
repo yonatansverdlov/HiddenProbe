@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # AGNEWS-Transformers: selected Block 2 + Final LayerNorm + logits.
-# Sweep: 27 configs selected by validation Kendall tau; seed 0.
+# Sweep: 24 Plateau-only configs selected by validation Kendall tau; seed 0.
 # Final: selected config, five seeds (0..4), mean +/- standard error.
 # Defaults: 40000 optimizer updates in each sweep and final run.
 # Usage: bash scripts/HiddenProbe/transformer/run_agnews_transformer_block2_sweep.sh [--dry-run|--only-sweep]
