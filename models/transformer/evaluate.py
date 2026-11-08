@@ -37,6 +37,7 @@ def _run_signature(cfg):
         float(cfg.get("cut_off", 0.0)),
         int(cfg.get("n_probes", -1)),
         str(cfg.get("readout_arch")),
+        int(cfg.get("hidden_block_only", 0)),
         int(cfg.get("n_classes", -1)),
     )
 
@@ -100,7 +101,8 @@ def build(a, sd):
                     readout_arch=a.get("readout_arch", "r0"), stats_bypass=a.get("stats_bypass", False),
                     dropout=a.get("dropout", 0.1), n_slots=a.get("n_slots", 16),
                     token_mlp=a.get("token_mlp", False), moments=a.get("moments", False),
-                    signed_mix=a.get("signed_mix", False))
+                    signed_mix=a.get("signed_mix", False),
+                    hidden_block_only=a.get("hidden_block_only", 0))
 
 
 def test_preds(d):
