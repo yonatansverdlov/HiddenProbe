@@ -170,7 +170,8 @@ class ChannelTrajectoryReadout(nn.Module):
     ARCH_VERSION = CT_ARCH_VERSION
 
     def __init__(self, n_probes: int = CT_N_PROBES, n_classes: int = CT_N_CLASSES, n_routes: int = 2,
-                 route_lens=None, dropout: float = 0.1, readout: str = "multi", ffn: int = CT_FFN):
+                 route_lens=None, dropout: float = 0.1, readout: str = "multi", ffn: int = CT_FFN,
+                 hidden_block_only: int = 0):
         super().__init__()
         route_lens = list(route_lens) if route_lens is not None else CT_ROUTE_LENS
         bad = []
@@ -181,6 +182,11 @@ class ChannelTrajectoryReadout(nn.Module):
             raise ValueError("channel_trajectory: " + "; ".join(bad))
         self.geom = geometry_for(n_probes, n_classes, route_lens)     # raises for unsupported zoos / Q / C
         self.ffn = int(ffn)          # mnist: fixed 384 (system gate); agnews: may be auto-fit to the 1.88M cap
+        if hidden_block_only not in (0, 1, 2):
+            raise ValueError("hidden_block_only must be 0 (full), 1, or 2")
+        self.hidden_block_only = int(hidden_block_only)
+        self.arch_version = (CT_ARCH_VERSION if not hidden_block_only
+                             else f"{CT_ARCH_VERSION}_block{hidden_block_only}_plus_norm")
         w = CT_W
         # B. ONE shared trajectory encoder (all channels, all three views)
         self.enc = nn.Sequential(nn.Linear(self.geom.traj, CT_ENC_HID), nn.GELU(), nn.Linear(CT_ENC_HID, w),
@@ -204,10 +210,22 @@ class ChannelTrajectoryReadout(nn.Module):
     # ---- pieces exposed for tests ----
     def tokens(self, contract: List[Dict]) -> torch.Tensor:
         A1, A2, An, logits = assemble_trajectories(contract, self.geom)
-        U1, U2, Un = self.enc(A1), self.enc(A2), self.enc(An)                          # [M,32,192] each
-        V2 = self.fuse(torch.cat([U2, Un], dim=-1))                                    # [M,32,192]
-        h1 = U1 + self.type_emb[TYPE_B1]
-        h2 = V2 + self.type_emb[TYPE_B2N]
+        if self.hidden_block_only:
+            # Symmetric single-block ablations. In either case the readout sees
+            # ONLY the selected block, final teacher LayerNorm, and logits.
+            # The same encoder, fusion, token count and trainable architecture
+            # are used for block 1 and block 2. No other block trace enters.
+            chosen = A1 if self.hidden_block_only == 1 else A2
+            U = self.enc(chosen)
+            Un = self.enc(An)
+            paired = self.fuse(torch.cat([U, Un], dim=-1))
+            h1 = U + self.type_emb[TYPE_B1]
+            h2 = paired + self.type_emb[TYPE_B2N]
+        else:
+            U1, U2, Un = self.enc(A1), self.enc(A2), self.enc(An)                      # [M,32,192] each
+            V2 = self.fuse(torch.cat([U2, Un], dim=-1))                                # [M,32,192]
+            h1 = U1 + self.type_emb[TYPE_B1]
+            h2 = V2 + self.type_emb[TYPE_B2N]
         lg = self.logit_proj(logits) + self.probe_emb + self.type_emb[TYPE_LOGIT]     # [M,256,192]
         M = A1.shape[0]
         return torch.cat([self.cls.expand(M, -1, -1), h1, h2, lg], dim=1)             # [M,321,192]
