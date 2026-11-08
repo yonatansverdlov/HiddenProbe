@@ -43,6 +43,7 @@ class TPConfig:
     token_mlp: bool = False            # §6 r2 pre-pool nonlinear feature map
     moments: bool = False              # §7 r2 per-probe moments -> logit token
     signed_mix: bool = False           # §8 r2 signed token mixing (A[4,n] per bucket, gated)
+    hidden_block_only: int = 0       # 0=full, 1 or 2=selected block + final norm + logits
 
     @property
     def key(self):
@@ -56,6 +57,10 @@ class LearnedSystem(nn.Module):
         nroutes = NROUTES[cfg.dataset]; nmax = NMAX[cfg.dataset]; route_lens = ROUTE_LENS[cfg.dataset]
         self._nroutes, self._nmax, self._route_lens = nroutes, nmax, route_lens
         self.arch_version = "legacy"
+        if cfg.hidden_block_only not in (0, 1, 2):
+            raise ValueError("hidden_block_only must be 0, 1, or 2")
+        if cfg.hidden_block_only and cfg.readout_arch != "channel_trajectory":
+            raise ValueError("hidden_block_only requires channel_trajectory")
         if cfg.readout_arch == "channel_trajectory":              # v1: mnist / agnews, shared g3 probes, Q256, fixed FFN
             bad = []
             if cfg.dataset not in CT_GEOMETRIES: bad.append(f"dataset={cfg.dataset} (supported: {list(CT_GEOMETRIES)})")
@@ -73,7 +78,8 @@ class LearnedSystem(nn.Module):
                 if getattr(cfg, flag): bad.append(flag)
             if bad:
                 raise ValueError("readout_arch=channel_trajectory rejects: " + ", ".join(bad))
-            self.arch_version = CT_ARCH_VERSION
+            self.arch_version = (CT_ARCH_VERSION if not cfg.hidden_block_only
+                                 else f"{CT_ARCH_VERSION}_block{cfg.hidden_block_only}_plus_norm")
         if cfg.generator == "g3":
             self.generator = ProbeGeneratorG3(cfg.dataset, n_probes=cfg.n_probes, seed=cfg.seed)
         elif cfg.generator == "glin":
@@ -90,7 +96,8 @@ class LearnedSystem(nn.Module):
             self.tokenizer = None; self.predictor = None
             kw = dict(n_probes=cfg.n_probes, n_classes=cfg.n_classes, n_routes=nroutes, nmax=nmax, ffn=cfg.ffn,
                       readout=cfg.readout, stats=cfg.stats_bypass, dropout=cfg.dropout, n_slots=cfg.n_slots,
-                      token_mlp=cfg.token_mlp, moments=cfg.moments, signed_mix=cfg.signed_mix, route_lens=route_lens)
+                      token_mlp=cfg.token_mlp, moments=cfg.moments, signed_mix=cfg.signed_mix, route_lens=route_lens,
+                      hidden_block_only=cfg.hidden_block_only)
             if cfg.readout_arch == "channel_trajectory":
                 # Separate init stream (spec §6): the readout's construction neither consumes nor depends on the
                 # global RNG that G3's decoders used above (G3 codes already use their own seeded generator), so
