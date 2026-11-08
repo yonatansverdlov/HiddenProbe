@@ -324,9 +324,13 @@ class ROutReadout(nn.Module):
 
 def build_readout(arch: str, *, n_probes, n_classes, n_routes, nmax, ffn, readout="multi",
                   n_blocks=2, stats=False, dropout=0.1, n_slots=16, token_mlp=False, moments=False,
-                  signed_mix=False, route_lens=None):
+                  signed_mix=False, route_lens=None, hidden_block_only=0):
     """Registry. r0 is built in system.py (tokenizer+predictor); here: r2 (cross-layer fusion), r3 (latent memory),
     rout (output/logits-only ProbeGen-style baseline)."""
+    if hidden_block_only not in (0, 1, 2):
+        raise ValueError("hidden_block_only must be 0, 1, or 2")
+    if hidden_block_only and arch != "channel_trajectory":
+        raise ValueError("hidden_block_only requires channel_trajectory")
     if arch == "rout":
         for bad, name in [(stats, "stats_bypass"), (token_mlp, "token_mlp"), (moments, "moments"), (signed_mix, "signed_mix")]:
             if bad:
@@ -340,7 +344,8 @@ def build_readout(arch: str, *, n_probes, n_classes, n_routes, nmax, ffn, readou
             raise ValueError("channel_trajectory fixes 2 global Transformer blocks")
         from .readout_channeltraj import ChannelTrajectoryReadout
         return ChannelTrajectoryReadout(n_probes, n_classes, n_routes, route_lens=route_lens, dropout=dropout,
-                                        readout=readout, ffn=ffn)
+                                        readout=readout, ffn=ffn,
+                                        hidden_block_only=hidden_block_only)
     if arch == "r2":
         return R2Readout(n_probes, n_classes, n_routes, nmax, ffn, n_blocks=n_blocks,
                          readout=readout, stats=stats, dropout=dropout, token_mlp=token_mlp, moments=moments,
