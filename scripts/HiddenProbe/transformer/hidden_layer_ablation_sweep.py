@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Transformer single-block ablation: validation-only 27-config sweep + 5-seed final.
+"""Transformer single-block ablation: validation-only 24-config sweep + 5-seed final.
 
 For each of MNIST-Transformers / AGNews-Transformers and Block 1 / Block 2,
 the model observes exactly: selected block, final teacher LayerNorm, logits.
 The two ablations use the same channel-trajectory readout, generator, probe
 bank geometry, capacity and hyperparameter grid. Original baselines are intact.
 
-Grid mirrors the existing HiddenProbe INR layer ablation:
-  pred_lr in {3e-4, 5e-4, 7e-4}
+Plateau-only grid containing the original full HiddenProbe settings:
+  pred_lr in {2.5e-4, 5e-4, 7e-4}
   plateau: patience {3,5}, factor {0.2,0.3,0.5,0.7}
-  cosine: one per pred_lr = 27 configs.
+  3 x 2 x 4 = 24 configurations per dataset/block.
 
 Unlike INR experiments, Transformers use optimizer updates, not epochs:
 default sweep and final budgets are 40,000 updates as in the original
@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-LRS = ("3e-4", "5e-4", "7e-4")
+LRS = ("2.5e-4", "5e-4", "7e-4")
 PATIENCES = (3, 5)
 FACTORS = ("0.2", "0.3", "0.5", "0.7")
 DATASET_SETTINGS = {
@@ -52,16 +52,14 @@ class Config:
 
     @property
     def tag(self) -> str:
-        if self.scheduler == "cosine":
-            return f"lr{self.pred_lr}_cosine"
         return f"lr{self.pred_lr}_plateau_pat{self.patience}_fac{self.factor}"
 
     def as_dict(self) -> dict:
         return {
             "pred_lr": self.pred_lr,
             "scheduler": self.scheduler,
-            "plateau_patience": self.patience if self.scheduler == "plateau" else None,
-            "plateau_factor": self.factor if self.scheduler == "plateau" else None,
+            "plateau_patience": self.patience,
+            "plateau_factor": self.factor,
         }
 
 
@@ -70,8 +68,10 @@ def configs() -> list[Config]:
         Config(lr, "plateau", p, f)
         for lr, p, f in itertools.product(LRS, PATIENCES, FACTORS)
     ]
-    result.extend(Config(lr, "cosine") for lr in LRS)
-    assert len(result) == 27 and len({c.tag for c in result}) == 27
+    assert len(result) == 24 and len({c.tag for c in result}) == 24
+    # The published full HiddenProbe MNIST/AGNews choices must remain in the grid.
+    assert Config("2.5e-4", "plateau", 5, "0.5") in result
+    assert Config("5e-4", "plateau", 5, "0.5") in result
     return result
 
 
