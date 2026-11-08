@@ -119,7 +119,7 @@ def _load_params(system, shadow):
 # ---------------- reproducibility state (additive; all default-off so legacy runs are byte-identical) ----------------
 _COMPAT_KEYS = ("method", "dataset", "generator", "n_classes", "n_probes", "readout", "readout_arch", "pma_seeds",
                 "stats_bypass", "token_mlp", "moments", "signed_mix",
-                "dropout", "n_slots", "seed")
+                "dropout", "n_slots", "seed", "hidden_block_only")
 
 
 def _check_resume_compat(saved: dict, now: dict):
@@ -324,7 +324,8 @@ def _mkcfg(a):
         ffn = a.ffn if a.ffn > 0 else fit_ffn(a.dataset, a.generator, a.n_classes, a.n_probes,
                                               a.readout, a.pma_seeds,
                                               readout_arch=a.readout_arch, stats_bypass=a.stats_bypass,
-                                              token_mlp=a.token_mlp, moments=a.moments, signed_mix=a.signed_mix)
+                                              token_mlp=a.token_mlp, moments=a.moments, signed_mix=a.signed_mix,
+                     hidden_block_only=a.hidden_block_only)
     return TPConfig(a.dataset, a.generator, a.n_classes, ffn, n_probes=a.n_probes,
                     readout=a.readout, pma_seeds=a.pma_seeds, seed=a.seed,
                     readout_arch=a.readout_arch, stats_bypass=a.stats_bypass, dropout=a.dropout, n_slots=a.n_slots,
@@ -529,6 +530,8 @@ def main():
             s.add_argument("--n_probes", type=int, default=64, help="Q (phase-2: up to 128)")
             s.add_argument("--readout", choices=["cls", "multi", "pma"], default="cls")
             s.add_argument("--pma_seeds", type=int, default=1)
+            s.add_argument("--hidden_block_only", type=int, choices=(0, 1, 2), default=0,
+                           help="Transformer channel-trajectory ablation: 1 or 2 selects only that block, plus final norm and logits")
             s.add_argument("--readout_arch", choices=["r0", "r2", "r3", "rout", "channel_trajectory"], default="r0",
                            help="r0=tokenizer+predictor; r2=cross-layer fusion; r3=full-memory latent; rout=output/logits-only "
                                 "baseline; channel_trajectory=v1 channel-first trajectory readout (mnist / agnews, shared g3 probes, Q256 only, mnist FFN fixed 384)")
