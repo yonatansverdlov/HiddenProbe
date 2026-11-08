@@ -30,7 +30,7 @@ bash scripts/HiddenProbe/transformer/run_agnews_transformer_block2_sweep.sh
 ```
 
 Each script first prepares the dataset, caches the fixed zero-threshold split
-(seed 0, 70/15/15), then performs a 27-config validation sweep followed by
+(seed 0, 70/15/15), then performs a 24-config validation sweep followed by
 five independent final seeds.
 
 Each script also accepts `--dry-run` (prints commands, does **not** download
@@ -39,12 +39,13 @@ Set `SKIP_DATA_SETUP=1` to bypass preparation/cache when already done.
 
 ## Search space and protocol
 
-The same 27-config scheduler/learning-rate grid used in the INR hidden-layer
-ablation is applied **separately** for each dataset and selected block:
+A 24-config Plateau-only grid that includes the original full HiddenProbe
+choices is applied **separately** for each dataset and selected block:
 
-- Predictor learning rate: `{3e-4, 5e-4, 7e-4}`.
+- Predictor learning rate: `{2.5e-4, 5e-4, 7e-4}`.
 - ReduceLROnPlateau: patience `{3,5}` x factor `{0.2,0.3,0.5,0.7}` (24 configs).
-- Cosine schedule: one for each learning rate (3 configs).
+- Every run uses `ReduceLROnPlateau`; there are no cosine or no-scheduler configurations.
+- The original full HiddenProbe configurations are included: MNIST (`pred_lr=2.5e-4`, patience 5, factor 0.5) and AGNews (`pred_lr=5e-4`, patience 5, factor 0.5).
 
 Fixed to the original full HiddenProbe Transformer runner: G3 learned probes,
 Q=256, channel-trajectory readout, hidden width=192 and two readout blocks;
