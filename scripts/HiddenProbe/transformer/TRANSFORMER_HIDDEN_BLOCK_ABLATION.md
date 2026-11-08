@@ -83,7 +83,7 @@ are taken from the baseline table; no baseline retraining is performed.
 ## Tests
 
 ```bash
-python -m unittest tests.test_transformer_hidden_block_ablation
+python -m unittest discover -s tests -p test_transformer_hidden_block_ablation.py
 ```
 
 Note: these scripts prepare GPU experiments; creating them in GitHub does not
