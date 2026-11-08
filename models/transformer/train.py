@@ -127,7 +127,11 @@ def _check_resume_compat(saved: dict, now: dict):
     into a channel_trajectory run). Compares the config keys that define the model, the resolved FFN, the
     architecture version and the train/val manifest hash."""
     sc, nc = saved.get("cfg", {}), now.get("cfg", {})
-    diffs = [f"{k}: saved={sc.get(k)!r} now={nc.get(k)!r}" for k in _COMPAT_KEYS if sc.get(k) != nc.get(k)]
+    # Old completed runs predate the additive single-block flag. Missing means full.
+    def compat_value(cfg, key):
+        return cfg.get(key, 0 if key == "hidden_block_only" else None)
+    diffs = [f"{k}: saved={compat_value(sc,k)!r} now={compat_value(nc,k)!r}"
+             for k in _COMPAT_KEYS if compat_value(sc,k) != compat_value(nc,k)]
     for k in ("resolved_ffn", "arch_version", "manifest_hash"):
         if saved.get(k) != now.get(k):
             diffs.append(f"{k}: saved={saved.get(k)!r} now={now.get(k)!r}")
