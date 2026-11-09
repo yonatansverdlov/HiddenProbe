@@ -60,4 +60,4 @@ SKIP_DATA_SETUP=1 SWEEP_EPOCHS=20 FINAL_EPOCHS=150 NUM_SEEDS=5 \
 ```
 
 Run the CPU capture regression test using
-`python -m unittest tests/test_svhn_hidden_layer_ablation.py`.
+`python -m unittest discover -s tests -p 'test_svhn_hidden_layer_ablation.py'`.
