@@ -23,6 +23,10 @@ import shlex
 import statistics
 import subprocess
 import sys
+import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from models.logging_utils import print_run_config, print_eval, print_seed_result
 
 ROOT = Path(__file__).resolve().parents[3]
 OFFICIAL_URL = "https://github.com/jonkahana/ProbeGen.git"
@@ -31,9 +35,120 @@ OFFICIAL_SHA = "e3b8e1485b01dcbccb0c508896d9c2d101a34fa3"
 
 
 def execute(cmd: list[str], *, cwd: Path) -> None:
-    """Run with inherited terminal stdout/stderr, preserving upstream tqdm."""
+    """Launch non-training shell commands with their normal terminal output."""
     print("+", shlex.join(cmd), flush=True)
     subprocess.run(cmd, cwd=cwd, check=True)
+
+
+def original_parameter_count(q: int) -> int:
+    """Exact original ProbeGen.py formula for linear_2_no_acts, width=256, six layers."""
+    latent, width, num_classes = 32, 256, 10
+    return (
+        q * latent  # Learned latent probes.
+        + (latent * latent + latent)  # 32 -> 32 generator.
+        + (2 * latent + 2)  # 32 -> 2 generator.
+        + (q * width + width)  # First mixer layer: Q -> 256.
+        + 4 * (width * width + width)  # Four 256 -> 256 mixers.
+        + (width * num_classes + num_classes)  # Output: 256 -> 10.
+    )
+
+
+def official_split_sizes(directory: Path) -> dict[str, int]:
+    path = directory / "experiments" / "inr_classification" / "dataset" / "fmnist_splits.json"
+    split = json.loads(path.read_text())
+    return {name: len(split[name]["label"]) for name in ("train", "val", "test")}
+
+
+def show_live_evaluations(
+    log_csv: Path, *, seen_steps: set[int], start_wall_time: float,
+    total_steps: int,
+) -> None:
+    """Watch the official main.py CSV; display only, never intervene in training."""
+    if not log_csv.is_file() or log_csv.stat().st_mtime < start_wall_time - 0.1:
+        return
+    try:
+        with log_csv.open(newline="") as fh:
+            rows = list(csv.DictReader(fh))
+    except (OSError, UnicodeError, csv.Error):
+        return
+    # The official training code rewrites the complete CSV after each evaluation.
+    # Read the whole file so the validation best is correct even if several
+    # evaluations finish between two polling intervals.
+    valid = []
+    for row in rows:
+        try:
+            step = int(row["global_step"])
+            val = float(row["val_acc"])
+            test = float(row["test_acc"])
+            loss = float(row["train_loss"])
+            epoch = int(row["epoch"]) + 1
+            if not all(map(math.isfinite, (val, test, loss))):
+                continue
+        except (KeyError, TypeError, ValueError):
+            continue
+        valid.append((step, epoch, loss, val, test))
+    best_val = -math.inf
+    for step, epoch, loss, val, test in sorted(valid):
+        is_best = val > best_val
+        best_val = max(best_val, val)
+        if step in seen_steps:
+            continue
+        seen_steps.add(step)
+        elapsed = max(0.0, time.time() - start_wall_time)
+        remaining = (elapsed / max(step, 1)) * max(total_steps - step, 0)
+        print_eval(
+            task="classification", step=step, epoch=epoch,
+            train_loss=loss, val_value=val, test_value=test,
+            elapsed=elapsed, remaining=remaining, new_best=is_best,
+        )
+
+
+def run_official_with_live_display(
+    cmd: list[str], *, official: Path, experiment: str, q: int,
+    seed: int, split_sizes: dict[str, int], results_dir: Path,
+) -> None:
+    """Render the same RUN CONFIG / EVAL format as the other project runners.
+
+    The model and optimizer run in the pinned official script, unmodified.
+    The official tqdm/raw output is saved separately to keep terminal logging
+    clean and comparable with the other HiddenProbe backends.
+    """
+    print_run_config(
+        method="ProbeGen (original)", task="classification", dataset="FMNIST-INR",
+        seed=seed, experiment=experiment,
+        train_size=split_sizes["train"], val_size=split_sizes["val"],
+        test_size=split_sizes["test"], probes=q,
+        parameters=original_parameter_count(q),
+        trainable=original_parameter_count(q), device="cuda",
+    )
+    log_dir = results_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    raw_log = log_dir / f"{experiment}.log"
+    run_dir = official / "experiments" / "fmnist_inr" / "runs" / experiment
+    log_csv = run_dir / "log.csv"
+    start_wall_time = time.time()
+    total_steps = 30 * math.ceil(split_sizes["train"] / 32)
+    seen_steps: set[int] = set()
+    print(f"[upstream] Original ProbeGen.py / CosineAnnealingLR; raw output: {raw_log}", flush=True)
+    with raw_log.open("w") as output:
+        with subprocess.Popen(
+            cmd, cwd=official, stdout=output, stderr=subprocess.STDOUT,
+        ) as proc:
+            while proc.poll() is None:
+                show_live_evaluations(log_csv, seen_steps=seen_steps,
+                                      start_wall_time=start_wall_time,
+                                      total_steps=total_steps)
+                time.sleep(0.5)
+            status = proc.returncode
+    show_live_evaluations(log_csv, seen_steps=seen_steps,
+                          start_wall_time=start_wall_time, total_steps=total_steps)
+    if status:
+        last = raw_log.read_text(errors="replace").splitlines()[-35:]
+        print("\n".join(last), file=sys.stderr, flush=True)
+        raise RuntimeError(
+            f"Original ProbeGen process failed (exit {status}); full log: {raw_log}"
+        )
+
 
 def prepare_upstream(directory: Path) -> None:
     if not (directory / ".git").is_dir():
@@ -148,6 +263,7 @@ def best_validation_row(run_dir: Path) -> dict:
         "best_val_acc": val,
         "test_acc_at_best_val": test,
         "best_logged_step": row["global_step"],
+        "best_logged_epoch": int(row["epoch"]) + 1,
     }
 
 
@@ -155,7 +271,7 @@ def save_tables(results_dir: Path, rows: list[dict], probes: list[int], seeds: l
     results_dir.mkdir(parents=True, exist_ok=True)
     per_seed = results_dir / "per_seed.csv"
     cols = ["q", "seed", "best_val_acc", "test_acc_at_best_val",
-            "best_logged_step", "official_exp_dir"]
+            "best_logged_step", "best_logged_epoch", "official_exp_dir"]
     with per_seed.open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=cols)
         writer.writeheader()
@@ -220,6 +336,7 @@ def main() -> None:
     prepare_upstream(official)
     link_dataset(official)
 
+    split_sizes = official_split_sizes(official)
     rows = []
     for q in args.probes:
         for seed in args.seeds:
@@ -228,8 +345,20 @@ def main() -> None:
             if (run_dir / "epoch_last.pth").is_file() and (run_dir / "log.csv").is_file():
                 print(f"[REUSE] {run_dir}")
             else:
-                execute(original_command(python, q, seed, name), cwd=official)
+                run_official_with_live_display(
+                    original_command(python, q, seed, name),
+                    official=official, experiment=name, q=q,
+                    seed=seed, split_sizes=split_sizes, results_dir=results,
+                )
             row = best_validation_row(run_dir)
+            if "best_logged_epoch" in row:
+                print_seed_result(
+                    task="classification", seed=seed,
+                    best_epoch=row["best_logged_epoch"],
+                    best_step=row["best_logged_step"],
+                    val_value=row["best_val_acc"],
+                    test_value=row["test_acc_at_best_val"],
+                )
             rows.append({"q": q, "seed": seed, **row, "official_exp_dir": str(run_dir)})
             save_tables(results, rows, args.probes, args.seeds)
     print(f"[DONE] Official code SHA {OFFICIAL_SHA}; results: {results}", flush=True)
