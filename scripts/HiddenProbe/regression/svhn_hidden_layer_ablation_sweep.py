@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SVHN CNN-layer ablation: original 24-config SVHN probe-LR sweep + five final seeds."""
+"""SVHN CNN-layer ablation: 24-config SVHN probe-LR sweep + five final seeds."""
 import argparse
 import csv
 import itertools
@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-# Original SVHN sweep: 3 probe LRs x 4 Plateau factors x 2 patiences.
+# SVHN layer-ablation grid: 3 probe LRs x 4 Plateau factors x 2 patiences.
 # The readout learning rate is fixed at 3e-4; DO NOT sweep hidden_lr.
 PROBE_LRS = ("1e-4", "3e-4", "6e-4")
 PATIENCES = (4, 5)

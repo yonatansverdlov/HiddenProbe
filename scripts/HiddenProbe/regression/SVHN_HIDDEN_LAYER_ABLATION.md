@@ -25,7 +25,7 @@ the original SVHN protocol: 128 shared image probes, raw-accuracy regression,
 expressive late encoder, interaction rank 96, mixer width 384, batch 32,
 Kendall tau, and final 150 epochs. **Readout LR stays fixed at 3e-4.**
 
-We reproduce the **original 24-config SVHN sweep**, varying **probe_lr**
+We use a **24-config SVHN layer-ablation sweep**, varying **probe_lr**
 (not hidden_lr or readout lr), Plateau factor, and patience:
 
 - probe_lr: 1e-4, 3e-4, 6e-4
