@@ -36,10 +36,20 @@ def execute(cmd: list[str], *, cwd: Path, log: Path | None = None) -> None:
         subprocess.run(cmd, cwd=cwd, check=True)
         return
     log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("w") as out:
-        result = subprocess.run(cmd, cwd=cwd, stdout=out, stderr=subprocess.STDOUT)
-    if result.returncode:
-        raise RuntimeError(f"Upstream training exited with {result.returncode}; see {log}")
+    # Stream the unmodified upstream stdout/stderr to BOTH the terminal and log.
+    # Do not hide progress or change the official model/training implementation.
+    with log.open("w", buffering=1) as out:
+        with subprocess.Popen(
+            cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        ) as process:
+            assert process.stdout is not None
+            for line in process.stdout:
+                print(line, end="", flush=True)
+                out.write(line)
+            returncode = process.wait()
+    if returncode:
+        raise RuntimeError(f"Upstream training exited with {returncode}; see {log}")
 
 
 def prepare_upstream(directory: Path) -> None:
