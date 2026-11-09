@@ -30,27 +30,10 @@ OFFICIAL_URL = "https://github.com/jonkahana/ProbeGen.git"
 OFFICIAL_SHA = "e3b8e1485b01dcbccb0c508896d9c2d101a34fa3"
 
 
-def execute(cmd: list[str], *, cwd: Path, log: Path | None = None) -> None:
+def execute(cmd: list[str], *, cwd: Path) -> None:
+    """Run with inherited terminal stdout/stderr, preserving upstream tqdm."""
     print("+", shlex.join(cmd), flush=True)
-    if log is None:
-        subprocess.run(cmd, cwd=cwd, check=True)
-        return
-    log.parent.mkdir(parents=True, exist_ok=True)
-    # Stream the unmodified upstream stdout/stderr to BOTH the terminal and log.
-    # Do not hide progress or change the official model/training implementation.
-    with log.open("w", buffering=1) as out:
-        with subprocess.Popen(
-            cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1,
-        ) as process:
-            assert process.stdout is not None
-            for line in process.stdout:
-                print(line, end="", flush=True)
-                out.write(line)
-            returncode = process.wait()
-    if returncode:
-        raise RuntimeError(f"Upstream training exited with {returncode}; see {log}")
-
+    subprocess.run(cmd, cwd=cwd, check=True)
 
 def prepare_upstream(directory: Path) -> None:
     if not (directory / ".git").is_dir():
@@ -245,8 +228,7 @@ def main() -> None:
             if (run_dir / "epoch_last.pth").is_file() and (run_dir / "log.csv").is_file():
                 print(f"[REUSE] {run_dir}")
             else:
-                execute(original_command(python, q, seed, name), cwd=official,
-                        log=results / "logs" / f"{name}.log")
+                execute(original_command(python, q, seed, name), cwd=official)
             row = best_validation_row(run_dir)
             rows.append({"q": q, "seed": seed, **row, "official_exp_dir": str(run_dir)})
             save_tables(results, rows, args.probes, args.seeds)
