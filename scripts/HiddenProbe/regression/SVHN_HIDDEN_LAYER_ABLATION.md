@@ -29,7 +29,7 @@ We reproduce the **original 24-config SVHN sweep**, varying **probe_lr**
 (not hidden_lr or readout lr), Plateau factor, and patience:
 
 - probe_lr: 1e-4, 3e-4, 6e-4
-- plateau factor: 0.2, 0.3, 0.5, 0.9
+- plateau factor: 0.2, 0.3, 0.5, 0.7
 - plateau patience: 4, 5
 
 Each config is trained for 20 epochs with seed 0, ranked by best validation

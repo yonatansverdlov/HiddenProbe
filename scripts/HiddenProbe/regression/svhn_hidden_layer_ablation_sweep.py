@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 # The readout learning rate is fixed at 3e-4; DO NOT sweep hidden_lr.
 PROBE_LRS = ("1e-4", "3e-4", "6e-4")
 PATIENCES = (4, 5)
-FACTORS = ("0.2", "0.3", "0.5", "0.9")
+FACTORS = ("0.2", "0.3", "0.5", "0.7")
 
 
 def candidates():
