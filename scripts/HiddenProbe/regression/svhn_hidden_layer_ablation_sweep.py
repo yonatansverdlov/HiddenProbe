@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SVHN CNN layer-ablation sweep: validation-only HPO then five final seeds."""
+"""SVHN CNN-layer ablation: original 24-config SVHN probe-LR sweep + five final seeds."""
 import argparse
 import csv
 import itertools
@@ -14,22 +14,20 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-# 27 configurations. Includes original SVHN baseline (3e-4, plateau 4/0.7).
-LRS = ("2e-4", "3e-4", "5e-4")
-PATIENCES = (3, 4)
-FACTORS = ("0.5", "0.7", "0.8", "0.9")
+# Original SVHN sweep: 3 probe LRs x 4 Plateau factors x 2 patiences.
+# The readout learning rate is fixed at 3e-4; DO NOT sweep hidden_lr.
+PROBE_LRS = ("1e-4", "3e-4", "6e-4")
+PATIENCES = (4, 5)
+FACTORS = ("0.2", "0.3", "0.5", "0.9")
 
 
 def candidates():
-    plateau = [dict(lr=lr, scheduler="plateau", patience=p, factor=f)
-               for lr, p, f in itertools.product(LRS, PATIENCES, FACTORS)]
-    cosine = [dict(lr=lr, scheduler="cosine", patience=None, factor=None) for lr in LRS]
-    return plateau + cosine
+    return [dict(probe_lr=lr, scheduler="plateau", patience=p, factor=f)
+            for lr, p, f in itertools.product(PROBE_LRS, PATIENCES, FACTORS)]
 
 
 def tag(c):
-    return (f'lr{c["lr"]}_cosine' if c["scheduler"] == "cosine"
-            else f'lr{c["lr"]}_plateau_p{c["patience"]}_f{c["factor"]}')
+    return f'probeLR{c["probe_lr"]}_plateau_p{c["patience"]}_f{c["factor"]}'
 
 
 def read_summary(directory, layers, seed, final):
@@ -74,7 +72,7 @@ def command(args, layers, c, epochs, seed, name, directory, final):
         "--probe_sharing", "shared", "--assert_canonical", "1",
         "--target_space", "raw", "--adapter_preset", "expressive",
         "--interaction_rank", "96", "--mixer_hidden", "384", "--hidden_dim", "0",
-        "--n_probes", str(args.n_probes), "--lr", c["lr"], "--probe_lr", "6e-4",
+        "--n_probes", str(args.n_probes), "--lr", "3e-4", "--probe_lr", c["probe_lr"],
         "--batch_size", "32", "--rank_loss_w", "0.0", "--weight_decay", "0.0",
         "--scheduler", c["scheduler"], "--plateau_min_lr", "3e-5",
         "--epochs", str(epochs), "--eval_every", "500", "--eval_cnn_bs", "256",
@@ -149,10 +147,10 @@ def main():
         return
     rows.sort(key=lambda r: r["best_val_tau"], reverse=True)
     csv_write(sweep / "sweep_results.csv", rows,
-              ["lr", "scheduler", "patience", "factor", "tag",
+              ["probe_lr", "scheduler", "patience", "factor", "tag",
                "seed", "best_val_tau", "run_dir"])
     win = rows[0]
-    c = {k: win[k] for k in ("lr", "scheduler", "patience", "factor")}
+    c = {k: win[k] for k in ("probe_lr", "scheduler", "patience", "factor")}
     (sweep / "selected_config.json").write_text(json.dumps({
         "layers": list(layers), "selected_by": "best_val_tau", "config": c,
         "best_val_tau": win["best_val_tau"]}, indent=2) + "\n")
