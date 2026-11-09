@@ -80,6 +80,8 @@ PRESETS = {  # hidden adapter sizes; interaction_rank overridable via CLI
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--hidden_mode", choices=["on", "off"], default="on")
+ap.add_argument("--hidden_layer_ids", type=int, nargs="+", default=None,
+                help="Zero-based selected target convolutional layers; omit to include all.")
 ap.add_argument("--probe_sharing", choices=["shared", "separate"], default="shared",
                 help="shared (PRIMARY: Q unique inputs, one forward gives logits+hidden) | separate (ablation)")
 ap.add_argument("--adapter_preset", choices=["compact", "expressive"], default="compact")
@@ -266,7 +268,7 @@ model = ProbeGenH(n_out_probes=args.n_out_probes, n_hidden_probes=args.n_hidden_
                   interaction_rank=args.interaction_rank, mixer_hidden=args.mixer_hidden,
                   hidden_mode=args.hidden_mode, probe_sharing=args.probe_sharing, models_c_in=args.models_c_in,
                   gen_type=args.gen_type, hidden_agg=args.hidden_agg, probe_mixer=args.probe_mixer,
-                  **preset).to(DEV)
+                  hidden_layer_ids=args.hidden_layer_ids, **preset).to(DEV)
 
 if args.init_kahana_checkpoint:                       # warm-start: load backbone, keep training ALL
     sd = torch.load(args.init_kahana_checkpoint, map_location=DEV)
@@ -574,6 +576,7 @@ _summ = {
     "params": rep["total_trainable"],
     "target_space": args.target_space,
     "scheduler": args.scheduler,
+    "hidden_layer_ids": (list(model.hidden_layer_ids) if model.hidden_layer_ids is not None else None),
     "lr": args.lr,
     "probe_lr": args.probe_lr,
     "plateau_factor": args.plateau_factor,

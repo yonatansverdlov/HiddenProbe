@@ -66,7 +66,7 @@ class ProbeGenH(nn.Module):
                  gen_type: str = "deep_linear_5", # probe generator (deep_linear_5=WP canonical, deep_linear_6=GS/Kahana)
                  hidden_agg: str = "neuron_collapse",  # hidden aggregation order: "neuron_collapse" (recipe ii,
                                                        #   DEFAULT, = current model) | "neuron_profile" (recipe i)
-                 probe_mixer: str = "none"):           # recipe-(i) only: "none" | "attn" | "tokenmix"
+                 probe_mixer: str = "none", hidden_layer_ids=None):           # recipe-(i) only: "none" | "attn" | "tokenmix"
         super().__init__()
         assert hidden_mode in ("on", "off")
         assert probe_sharing in ("shared", "separate")
@@ -82,6 +82,15 @@ class ProbeGenH(nn.Module):
         self.gen_latent_z = gen_latent_z
         self.spatial_grid = spatial_grid
         self.use_hidden_statistics = use_hidden_statistics
+        self.hidden_layer_ids = None if hidden_layer_ids is None else tuple(hidden_layer_ids)
+        if self.hidden_layer_ids is not None and (
+            not self.hidden_layer_ids or len(set(self.hidden_layer_ids)) != len(self.hidden_layer_ids)
+            or self.hidden_layer_ids != tuple(sorted(self.hidden_layer_ids))
+            or any(not isinstance(i, int) or i < 0 for i in self.hidden_layer_ids)
+        ):
+            raise ValueError("hidden_layer_ids must be unique ascending nonnegative indices")
+        if hidden_mode == "off" and self.hidden_layer_ids is not None:
+            raise ValueError("hidden_layer_ids requires hidden_mode='on'")
 
         # ---- Kahana backbone (official modules) --------------------------------------------------
         # ONE shared deep-linear generator; the output probe bank (also the hidden bank when shared).
@@ -192,7 +201,8 @@ class ProbeGenH(nn.Module):
         if self.probe_sharing == "shared":
             # PRIMARY: ONE forward on the SAME Q probes yields BOTH logits and hidden (Q unique inputs).
             caps = [capture_features(net, X_out, G=self.spatial_grid,
-                                     stats=self.use_hidden_statistics) for net in nets]
+                                     stats=self.use_hidden_statistics,
+                                     layer_ids=self.hidden_layer_ids) for net in nets]
             logits = torch.stack([c[0] for c in caps])                        # [B, Q, 10]
             recs_l = [c[1] for c in caps]
             P_hid = self.n_out_probes
@@ -201,7 +211,8 @@ class ProbeGenH(nn.Module):
             logits = torch.stack([net(X_out) for net in nets])                # [B, P_out, 10]
             X_hidden = self.generate_hidden_probes()
             recs_l = [capture_features(net, X_hidden, G=self.spatial_grid,
-                                       stats=self.use_hidden_statistics)[1] for net in nets]
+                                       stats=self.use_hidden_statistics,
+                                       layer_ids=self.hidden_layer_ids)[1] for net in nets]
             P_hid = self.n_hidden_probes
         batch = pad_batch(recs_l, META_DIM, P_hid, G=self.spatial_grid,
                           device=device, dtype=X_out.dtype)

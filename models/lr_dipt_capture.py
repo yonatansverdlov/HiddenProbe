@@ -71,24 +71,33 @@ def _repstats(post):
     return torch.stack([stable_rank, eff_rank, *top5.unbind(), mean_cos, max_corr]).nan_to_num_(0.0)
 
 
-def capture_features(net, X, G=4, stats=False):
+def capture_features(net, X, G=4, stats=False, layer_ids=None):
     """Run net on probes X [P,3,32,32] with summary-in-forward. Returns (logits [P,10], layer_records).
     Each record: cells [P,C,G,G,6], glob [P,C,14], meta dict, C. If stats=True also rep [N_REP] (detached
     SVD statistics; gated behind --use_hidden_statistics so the baseline v1 late is unchanged)."""
     x = X
     L = len(net.layers)
+    if layer_ids is not None:
+        layer_ids = tuple(layer_ids)
+        if (not layer_ids or len(set(layer_ids)) != len(layer_ids)
+                or layer_ids != tuple(sorted(layer_ids))
+                or any(not isinstance(i, int) or i < 0 or i >= L for i in layer_ids)):
+            raise ValueError(f"Invalid hidden layer IDs {layer_ids}; expected unique ascending indices in [0,{L-1}]")
     recs = []
     for l, (layer, act) in enumerate(zip(net.layers, net.activations)):
         pre = layer(x)                                                    # [P,C,H,W] pre-activation
-        H, W = pre.shape[-2:]
-        pre_cells, pre_glob = _summarize(pre, G)
-        post = act(pre)                                                   # post-activation
-        post_cells, post_glob = _summarize(post, G)
-        rec = dict(cells=torch.cat([pre_cells, post_cells], dim=-1),      # [P,C,G,G,6]
-                   glob=torch.cat([pre_glob, post_glob], dim=-1),         # [P,C,14]
-                   meta=_layer_meta(layer, act, l, L, H, W), C=pre.shape[1])
-        if stats: rec["rep"] = _repstats(post)                           # [N_REP] detached, opt-in
-        recs.append(rec)
+        keep = layer_ids is None or l in layer_ids
+        if keep:
+            H, W = pre.shape[-2:]
+            pre_cells, pre_glob = _summarize(pre, G)
+        post = act(pre)                                                   # full CNN always executes
+        if keep:
+            post_cells, post_glob = _summarize(post, G)
+            rec = dict(cells=torch.cat([pre_cells, post_cells], dim=-1),
+                       glob=torch.cat([pre_glob, post_glob], dim=-1),
+                       meta=_layer_meta(layer, act, l, L, H, W), C=pre.shape[1])
+            if stats: rec["rep"] = _repstats(post)
+            recs.append(rec)
         x = post
     logits = net.fc(net.flatten(net.pool(x)))                            # [P,10]
     return logits, recs
