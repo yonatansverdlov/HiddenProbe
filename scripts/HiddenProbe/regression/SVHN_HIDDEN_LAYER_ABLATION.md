@@ -20,24 +20,21 @@ Output-only (ProbeGen) and all-three-layer HiddenProbe already exist; their
 canonical scripts are unchanged. In particular, omitting --hidden_layer_ids
 preserves the previous HiddenProbe architecture.
 
-Each wrapper calls the shared SVHN layer-ablation sweep driver, which uses
-the original SVHN protocol (128 shared image probes, raw-accuracy regression,
+Each wrapper calls the shared SVHN layer-ablation sweep driver, using
+the original SVHN protocol: 128 shared image probes, raw-accuracy regression,
 expressive late encoder, interaction rank 96, mixer width 384, batch 32,
-probe LR 6e-4, Kendall tau, final 150 epochs). As in the INR ablations, we
-search over 27 hyperparameter choices with seed 0 (20 epochs each) using
-only best validation tau; we then retrain the selected config for five
-independent seeds (0–4), 150 epochs. During the sweep, test evaluation is
-disabled. The original SVHN setting lr=3e-4, plateau patience=4,
-factor=0.7 appears in the grid.
+Kendall tau, and final 150 epochs. **Readout LR stays fixed at 3e-4.**
 
-The current repository's run_svhn_regression.sh does five fixed-hyperparameter
-seeds, not an HPO sweep. This script adopts the 27-config validation-sweep
-pattern used for FMNIST/CIFAR layer selection, with SVHN-specific ranges:
+We reproduce the **original 24-config SVHN sweep**, varying **probe_lr**
+(not hidden_lr or readout lr), Plateau factor, and patience:
 
-- lr: 2e-4, 3e-4, 5e-4
-- plateau patience: 3, 4
-- plateau factor: 0.5, 0.7, 0.8, 0.9
-- plus a cosine schedule for each lr
+- probe_lr: 1e-4, 3e-4, 6e-4
+- plateau factor: 0.2, 0.3, 0.5, 0.9
+- plateau patience: 4, 5
+
+Each config is trained for 20 epochs with seed 0, ranked by best validation
+Kendall tau only (no test evaluation). The winning configuration is then
+retrained for 150 epochs with five independent seeds 0–4.
 
 Each mask writes to
 `checkpoints/hidden_layer_ablation/svhn/layers_<mask>/`.
