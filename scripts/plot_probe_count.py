@@ -254,6 +254,8 @@ def main() -> None:
     parser.add_argument("--name", default=None)
     parser.add_argument("--layout", choices=("both", "combined", "individual"),
                         default="both")
+    parser.add_argument("--hide-hiddenprobe-256", action="store_true",
+                        help="Leave the HiddenProbe curve empty at N=256 (ProbeGen remains plotted)")
     parser.add_argument("--uncertainty", choices=("sem", "sd", "none"), default="sem",
                         help="SEM default; 'none' matches the no-errorbars seed-0 figure")
     parser.add_argument("--dpi", type=int, default=300)
@@ -277,6 +279,9 @@ def main() -> None:
             print(f"[skip] {dataset}: {exc}", file=sys.stderr)
     if not data:
         parser.error(f"No paired summaries in {args.input_root}")
+    if args.hide_hiddenprobe_256:
+        for dataset in data:
+            data[dataset]["hiddenprobe"].pop(256, None)
     set_paper_style()
     order = [d for d in requested if d in data]
     if args.layout in ("both", "combined"):
