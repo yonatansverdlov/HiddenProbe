@@ -531,7 +531,7 @@ def main():
                            help="shared unconditioned probe generator: g3 (nonlinear) | glin (deep-linear)")
             s.add_argument("--n_classes", type=int, default=10)
             s.add_argument("--ffn", type=int, default=944, help="predictor FFN width; <=0 -> auto-fit to <=1.9M")
-            s.add_argument("--n_probes", type=int, default=64, help="Q (phase-2: up to 128)")
+            s.add_argument("--n_probes", type=int, default=64, help="Number of learned probes (Q)")
             s.add_argument("--readout", choices=["cls", "multi", "pma"], default="cls")
             s.add_argument("--pma_seeds", type=int, default=1)
             s.add_argument("--hidden_block_only", type=int, choices=(0, 1, 2), default=0,
