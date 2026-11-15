@@ -106,7 +106,7 @@ For MNIST-Transformers and AGNews-Transformers we report five accuracy-threshold
 
 ## ProbeGen experiments
 
-All ProbeGen runs use **128 probes** and five training seeds (0–4). The Transformer reference scripts used 256 probes; the ProbeGen Transformer runners below use 128 as specified for this repository.
+All ProbeGen experiments run five training seeds (0–4). The INR classification and CNN accuracy-prediction runners use **128 probes**. The Transformer runners use **256 probes**, matching the HiddenProbe Transformer probe budget; checkpoint directories are labeled `Q256` to keep them separate from older `Q128` runs.
 
 Each runner prepares or verifies its dataset before training. For CIFAR-10 Wild Park, ProbeGen reuses the **same** prebuilt `cnn_cache_{train,val,test}.pt` files as HiddenProbe, from `$PGH_WP_CACHE` or `data/regression/cifar10_wp/wp_cnn_cache/`, without extracting individual checkpoints. The augmented CIFAR-10 ProbeGen run uses 20 additional INR realizations as in its source script.
 
