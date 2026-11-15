@@ -170,7 +170,15 @@ Each runner prepares or verifies its dataset before training. For CIFAR-10 Wild 
 
 ### Transformer accuracy prediction
 
-Run each threshold separately (0%, 20%, 40%, 60%, 80%). Each threshold script trains five seeds and reuses the threshold-specific dataset cache.
+All ProbeGen Transformer runners use **Q=256**, the same probe budget as HiddenProbe. Run each threshold separately (0%, 20%, 40%, 60%, 80%). Each threshold script trains five seeds and reuses the threshold-specific dataset cache.
+
+To rerun **threshold 0** for both MNIST and AGNews with five seeds each, in fresh checkpoint directories:
+
+```bash
+RUN_TAG=rerun1 bash scripts/ProbeGen/transformer/run_thresh0_q256.sh both
+```
+
+Or select `mnist` / `agnews` instead of `both`. Change `RUN_TAG` for each fresh rerun; the scripts skip an existing `last.pt` in the selected directory, and no checkpoints are deleted.
 
 **MNIST-Transformers**
 
