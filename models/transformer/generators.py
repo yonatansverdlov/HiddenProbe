@@ -4,7 +4,8 @@ The probes are identical for every target (no weight access, no target condition
 Banks (Q = n_probes):
   AGNews: encoder_codes [Q,17,32]                                          -> Q encoder probes.
   MNIST : encoder_codes [n_enc,17,32] + image_patch_codes [n_nat,49,16]    -> n_enc+n_nat=Q (3:1 enc:native).
-          Q64 -> 48+16 ; Q128 -> 96+32. Global probe IDs 0..n_enc-1 encoder, n_enc..Q-1 native.
+          For the Q256 Transformer runners: 192 encoder + 64 native probes.
+          Global probe IDs 0..n_enc-1 encoder, n_enc..Q-1 native.
 G3: x = z + linear_out(GELU(linear_in(z))) (weights shared across codes).
 """
 from __future__ import annotations
