@@ -20,7 +20,14 @@ bash scripts/setup_data/transformer_mnist.sh
 python "$MAIN_PY" transformer cache \
   --dataset mnist --seed 0 --cut_off "$CUT" --data_root "$DATA_ROOT"
 
-PREFIX="checkpoints/probegen_mnist_transformer_Q256_thresh${CUT_PCT}"
+# Optional namespace for a fresh rerun without overwriting existing checkpoints.
+# Example: RUN_TAG=rerun1 bash scripts/ProbeGen/transformer/mnist/run_mnist_transformer_thresh0.sh
+RUN_TAG="${RUN_TAG:-}"
+if [[ -n "$RUN_TAG" && ! "$RUN_TAG" =~ ^[A-Za-z0-9_-]+$ ]]; then
+  echo "RUN_TAG must contain only letters, digits, underscores, or hyphens" >&2
+  exit 2
+fi
+PREFIX="checkpoints/probegen_mnist_transformer_Q256_thresh${CUT_PCT}${RUN_TAG:+_${RUN_TAG}}"
 RUN_DIRS=()
 for SEED in "${SEEDS[@]}"; do
   RUNS="${PREFIX}_s${SEED}"
