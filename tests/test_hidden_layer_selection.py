@@ -6,7 +6,7 @@ Run from the repository root:
 import argparse
 import unittest
 
-from models.hidden_layer_selection import parse_bool_argument, resolve_hidden_layer_ids
+from models.probegen_core_utils import parse_bool_argument, resolve_hidden_layer_ids
 
 
 class HiddenLayerSelectionTests(unittest.TestCase):

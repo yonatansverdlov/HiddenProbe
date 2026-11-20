@@ -11,10 +11,25 @@ ckpt per run). Loader uses torch.load(weights_only=True) (plain tensor state-dic
 """
 from __future__ import annotations
 import os, re, glob, json, hashlib, random
+import sys
 from typing import Dict, List
 import torch
 
-from models.progress import show_progress
+
+# Data-loading progress display (formerly models/progress.py).
+def show_progress(label: str, done: int, total: int, *, width: int = 40) -> None:
+    """Print an in-place bar at integer-percent changes, with a final newline."""
+    if total <= 0:
+        return
+    pct = min(100, int(100 * done / total))
+    prev = min(100, int(100 * (done - 1) / total)) if done > 0 else -1
+    if done not in (0, total) and pct == prev:
+        return
+    filled = int(width * pct / 100)
+    bar = "#" * filled + "-" * (width - filled)
+    print(f"\r[setup] {label}: [{bar}] {pct:3d}% ({done:,}/{total:,})",
+          end="\n" if done >= total else "", file=sys.stderr, flush=True)
+
 
 # <run_id>_<epoch>_<acc>.pt  — epoch-75 with a numeric accuracy
 EP75_RE = re.compile(r"^([0-9a-z]+)_75_(\d+)\.pt$")

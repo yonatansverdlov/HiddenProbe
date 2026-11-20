@@ -27,7 +27,7 @@ sys.path.insert(0, ROOT)   # so data.py and the models/ package import WITHOUT n
 from models.lowrank import make_linear
 from models.probegen_utils import LowRankEncoderLayer, find_hidden_linear_layers, run_with_linear_activation_hooks
 from models.hiddenprobe_probe_source import LearnedProbeSource
-from models.hidden_layer_selection import parse_bool_argument, resolve_hidden_layer_ids
+from models.probegen_core_utils import parse_bool_argument, resolve_hidden_layer_ids
 from models.logging_utils import print_run_config, print_eval, print_seed_result
 from data import INRDataset
 

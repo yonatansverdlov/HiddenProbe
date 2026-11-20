@@ -6,8 +6,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from .hidden_layer_selection import resolve_hidden_layer_ids
 from .probegen_core_utils import (
+    resolve_hidden_layer_ids,
     apply_inductive_per_probe_init,
     build_hidden_aggregators,
     build_mlp_head,

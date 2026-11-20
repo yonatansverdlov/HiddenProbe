@@ -18,7 +18,7 @@ import argparse, os, time, json, random, subprocess, sys, torch, torch.nn as nn,
 import numpy as np
 from models.probegen_h import ProbeGenH
 from models.logging_utils import print_run_config, print_eval, print_seed_result
-from models.eval_benchmark import timed_eval, save_benchmark
+from models.logging_utils import timed_eval, save_benchmark
 from data import load_cnns, DEFAULT_SPLITS
 from models.metrics_cnn import acc_to_logit, all_metrics
 

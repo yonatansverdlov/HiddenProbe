@@ -18,7 +18,7 @@ from models.transformer.system import LearnedSystem, TPConfig, PARAM_CEILING, fi
 from models.transformer.readout_channeltraj import CT_FFN                # channel_trajectory v1: fixed FFN (no auto-fit)
 from models.transformer.acquire import predict
 from models.logging_utils import print_run_config, print_eval, print_seed_result
-from models.eval_benchmark import timed_eval, save_benchmark
+from models.logging_utils import timed_eval, save_benchmark
 try:
     from scipy.stats import kendalltau, spearmanr
 except Exception:

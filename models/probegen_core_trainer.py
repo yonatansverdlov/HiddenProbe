@@ -16,9 +16,9 @@ import torch.nn.functional as F
 from scipy.stats import kendalltau
 
 from models.probegen_core import ProbeGen
-from models.hidden_layer_selection import parse_bool_argument
+from models.probegen_core_utils import parse_bool_argument
 from models.logging_utils import print_run_config, print_eval, print_seed_result, print_final_summary
-from models.eval_benchmark import timed_eval, save_benchmark
+from models.logging_utils import timed_eval, save_benchmark
 from data_probegen import CIFAR10INRDataset, INRDataset, CachedCNNParkDataset
 
 
