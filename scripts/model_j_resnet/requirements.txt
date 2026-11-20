@@ -1,6 +1,0 @@
-# Extra dependencies for scripts/model_j_resnet/
-torchvision
-transformers
-datasets
-safetensors
-Pillow
