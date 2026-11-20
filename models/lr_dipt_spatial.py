@@ -1,19 +1,12 @@
-"""LR-DIPT Phase B2/B3: spatial hidden tokenizer + early output-conditioned interaction branch.
+"""Spatial encoding of CNN hidden activations for the active late hidden branch.
 
-B2 tokenizer: each map's 4x4x6 cells + Fourier position + FiLM(layer metadata) -> low-rank map-query
-pool -> concat global stats -> 64-d hidden token. Shared across all layers/architectures; layer
-semantics enter only through metadata. Chunked over maps to bound memory.
-
-B3 early branch: a probe's OUTPUT token conditions (queries) that same probe's hidden CHANNEL tokens
-(low-rank cross-attn, channel-permutation-invariant), then an ordered low-rank layer transformer with a
-relative-layer-distance bias, an output-conditioned layer pool, and a Tucker pool over fixed probe
-slots -> z_early. All early-branch VALUES are hidden-derived (the output token only conditions).
+The spatial tokenizer summarizes maps with Fourier positions and layer metadata.
+LateBranch pools channels, probes, and layers to a permutation-invariant representation.
 """
 import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from models.lr_dipt_lowrank import (FactorizedLinear, LowRankAttention, LowRankAttentionPool, TuckerPool)
+from models.lr_dipt_lowrank import FactorizedLinear, LowRankAttention, LowRankAttentionPool
 
 
 def fourier_grid(G, n_freq):
@@ -72,57 +65,6 @@ def tokenize_maps(tok, cells, glob, meta_emb, cmask, chunk=2048):
         outs.append(tok(cflat[i:i + chunk], gflat[i:i + chunk], mflat[i:i + chunk]))
     H = torch.cat(outs, 0).reshape(B, L, P, C, dh)
     return H * cmask[:, :, None, :, None].to(H.dtype)                    # zero padded channels
-
-
-def output_probe_token(logits, d=64):
-    """Per-probe feature from the 10 logits + confidence stats (order/scale preserved). -> [B,P,d_raw]."""
-    lp = F.log_softmax(logits, dim=-1); p = lp.exp()
-    ent = -(p * lp).sum(-1, keepdim=True)
-    maxp = p.max(-1, keepdim=True).values
-    top2 = p.topk(2, dim=-1).values
-    margin = (top2[..., :1] - top2[..., 1:2])
-    l2 = logits.norm(dim=-1, keepdim=True)
-    lse = torch.logsumexp(logits, dim=-1, keepdim=True)
-    return torch.cat([logits, ent, maxp, margin, l2, lse], dim=-1)       # [B,P,15]
-
-
-class EarlyBranch(nn.Module):
-    def __init__(s, d=64, P=128, attn_rank=16, r_probe=8, r_feat=32, z_dim=128, max_rel=4):
-        super().__init__()
-        s.out_tok = nn.Sequential(nn.Linear(15, d), nn.GELU(), nn.Linear(d, d))
-        s.probe_emb = nn.Parameter(torch.randn(P, d) * 0.02)
-        s.chan_attn = LowRankAttention(d, attn_rank)                     # output-query over channels
-        s.rel_bias = nn.Parameter(torch.zeros(2 * max_rel + 1))          # relative-layer-distance bias
-        s.max_rel = max_rel
-        s.layer_attn = LowRankAttention(d, attn_rank)                    # ordered layer self-attn
-        s.layer_ff = FactorizedLinear(d, d, attn_rank, act=nn.GELU(), zero_init_up=True)
-        s.layer_norm = nn.LayerNorm(d)
-        s.layer_pool = LowRankAttention(d, attn_rank)                    # output-query over layers
-        s.tucker = TuckerPool(P, d, r_probe, r_feat)
-        s.proj = FactorizedLinear(s.tucker.out_dim, z_dim, rank=32)
-
-    def forward(s, logits, H, cmask, lmask):
-        # logits [B,P,10]; H hidden tokens [B,L,P,C,d]; cmask [B,L,C]; lmask [B,L]
-        B, L, P, C, d = H.shape
-        ot = s.out_tok(output_probe_token(logits)) + s.probe_emb.unsqueeze(0)   # [B,P,d]
-        # (1) output-conditioned channel pooling per (b,l,p): query=ot[b,p], keys=H[b,l,p,:]
-        q = ot.permute(0, 1, 2)[:, None].expand(B, L, P, d).reshape(B * L * P, 1, d)
-        keys = H.permute(0, 1, 2, 3, 4).reshape(B * L * P, C, d)
-        kpm = (~cmask)[:, :, None, :].expand(B, L, P, C).reshape(B * L * P, C)
-        e = s.chan_attn(q, keys, keys, key_padding_mask=kpm).reshape(B, L, P, d)  # [B,L,P,d]
-        # (2) ordered layer transformer per probe (relative-distance bias, masked)
-        el = e.permute(0, 2, 1, 3).reshape(B * P, L, d)                  # [B*P,L,d]
-        idx = torch.arange(L, device=H.device)
-        rel = (idx[None, :] - idx[:, None]).clamp(-s.max_rel, s.max_rel) + s.max_rel
-        bias = s.rel_bias[rel][None]                                     # [1,L,L]
-        lpm = (~lmask)[:, None, :].expand(B, P, L).reshape(B * P, L)
-        el = el + s.layer_attn(el, el, el, key_padding_mask=lpm, rel_bias=bias)
-        el = el + s.layer_ff(s.layer_norm(el))
-        # (3) output-conditioned layer pooling: query = probe output token
-        oq = ot.reshape(B * P, 1, d)
-        ep = s.layer_pool(oq, el, el, key_padding_mask=lpm).reshape(B, P, d)     # [B,P,d]
-        # (4) Tucker pool over fixed probe slots -> z_early
-        return s.proj(s.tucker(ep))                                      # [B,z_dim]
 
 
 def layer_glob_stats(glob, cmask, probe_mask=None):

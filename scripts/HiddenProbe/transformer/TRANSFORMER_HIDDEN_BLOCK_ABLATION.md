@@ -81,11 +81,5 @@ Completed runs are reused if the checkpoint configuration matches; incomplete
 ones are restarted. Old unmodified ProbeGen and full HiddenProbe results
 are taken from the baseline table; no baseline retraining is performed.
 
-## Tests
-
-```bash
-python -m unittest discover -s tests -p test_transformer_hidden_block_ablation.py
-```
-
 Note: these scripts prepare GPU experiments; creating them in GitHub does not
 run the sweeps on the lab cluster.

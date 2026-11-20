@@ -60,9 +60,8 @@ The parser checks the expected metric (accuracy or Kendall tau),
 duplicate probe counts, valid values, and consistent seed counts.
 Missing probes are never interpolated.
 
-## Dependencies and tests
+## Dependency
 
 ~~~bash
 python -m pip install matplotlib
-python -m unittest discover -s tests -p 'test_plot_probe_count.py'
 ~~~

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import argparse
 import math
 from typing import Iterable, Optional, Sequence, Tuple
@@ -9,26 +8,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-
-
-@contextmanager
-def seeded_initialization(seed: Optional[int]):
-    """Temporarily seed PyTorch without changing the caller's RNG state."""
-    if seed is None:
-        yield
-        return
-
-    with torch.random.fork_rng(devices=[]):
-        torch.manual_seed(seed)
-        yield
-
-
-def make_torch_generator(seed: Optional[int]) -> Optional[torch.Generator]:
-    if seed is None:
-        return None
-    generator = torch.Generator(device="cpu")
-    generator.manual_seed(seed)
-    return generator
+from models.probegen_utils import (
+    DeepLinearGenerator,
+    build_per_probe_mlp,
+    find_hidden_linear_layers,
+    run_with_linear_activation_hooks,
+    flatten_probe_tokens,
+)
 
 
 class LowRankLinear(nn.Module):
@@ -219,144 +205,6 @@ class SmallLowRankHiddenEncoder(nn.Module):
             z = z.max(dim=1).values
 
         return self.rho(z)
-
-
-class ProbeSource(nn.Module):
-    """Own a trainable or fixed set of vector probes."""
-
-    def __init__(self, initial_input: Tensor, generator: nn.Module, trainable: bool):
-        super().__init__()
-        self.generator = generator
-
-        if trainable:
-            self.input = nn.Parameter(initial_input)
-        else:
-            self.register_buffer("input", initial_input)
-
-    def forward(self) -> Tensor:
-        return self.generator(self.input)
-
-
-from typing import Optional
-
-import torch
-import torch.nn as nn
-
-
-class DeepLinearGenerator(nn.Module):
-    """Probe-image generator used by the original ProbeGen implementation."""
-
-    def __init__(
-        self,
-        out_channels: int,
-        latent_dim: int = 100,
-        width_mult: int = 16,
-        n_layers: int = 6,
-    ):
-        super().__init__()
-
-        if n_layers == 6:
-            layers = [
-                nn.ConvTranspose2d(
-                    latent_dim,
-                    width_mult * 8,
-                    kernel_size=4,
-                    stride=1,
-                    padding=0,
-                ),
-                nn.ConvTranspose2d(
-                    width_mult * 8,
-                    width_mult * 4,
-                    kernel_size=4,
-                    stride=2,
-                    padding=1,
-                ),
-                nn.ConvTranspose2d(
-                    width_mult * 4,
-                    width_mult * 2,
-                    kernel_size=4,
-                    stride=2,
-                    padding=1,
-                ),
-                nn.ConvTranspose2d(
-                    width_mult * 2,
-                    width_mult * 2,
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                ),
-                nn.ConvTranspose2d(
-                    width_mult * 2,
-                    width_mult,
-                    kernel_size=4,
-                    stride=2,
-                    padding=1,
-                ),
-                nn.ConvTranspose2d(
-                    width_mult,
-                    out_channels,
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                ),
-                nn.Tanh(),
-            ]
-
-        elif n_layers == 5:
-            layers = [
-                nn.ConvTranspose2d(
-                    latent_dim,
-                    width_mult * 8,
-                    kernel_size=4,
-                    stride=1,
-                    padding=0,
-                ),
-                nn.ConvTranspose2d(
-                    width_mult * 8,
-                    width_mult * 4,
-                    kernel_size=4,
-                    stride=2,
-                    padding=1,
-                ),
-                nn.ConvTranspose2d(
-                    width_mult * 4,
-                    width_mult * 2,
-                    kernel_size=4,
-                    stride=2,
-                    padding=1,
-                ),
-                nn.ConvTranspose2d(
-                    width_mult * 2,
-                    width_mult,
-                    kernel_size=4,
-                    stride=2,
-                    padding=1,
-                ),
-                nn.ConvTranspose2d(
-                    width_mult,
-                    out_channels,
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                ),
-                nn.Tanh(),
-            ]
-
-        elif n_layers == 0:
-            layers = [
-                nn.Tanh(),
-            ]
-
-        else:
-            raise ValueError(
-                "DeepLinearGenerator supports "
-                f"n_layers in {{0, 5, 6}}, got {n_layers}."
-            )
-
-        self.main = nn.Sequential(*layers)
-
-    def forward(self, z):
-        return self.main(z)
 
 
 class ProbeSource(nn.Module):
@@ -619,52 +467,6 @@ def build_hidden_aggregators(
     )
 
 
-def build_per_probe_mlp(
-    *,
-    input_dim: int,
-    d_hidden: int,
-    kind: str,
-    hidden_width: Optional[int],
-    output_dim: Optional[int],
-) -> Tuple[Optional[nn.Module], int]:
-    if kind == "mlp":
-        kind = "mlp2"
-
-    valid = {"none", "linear", "mlp2", "mlp3"}
-    if kind not in valid:
-        raise ValueError(f"Unknown per_probe_mlp='{kind}'. Expected one of {valid}.")
-
-    width = d_hidden if hidden_width is None else hidden_width
-    out_dim = width if output_dim is None else output_dim
-
-    if kind == "none":
-        return None, input_dim
-
-    if kind == "linear":
-        return nn.Linear(input_dim, out_dim), out_dim
-
-    if kind == "mlp2":
-        return (
-            nn.Sequential(
-                nn.Linear(input_dim, width),
-                nn.ReLU(),
-                nn.Linear(width, out_dim),
-            ),
-            out_dim,
-        )
-
-    return (
-        nn.Sequential(
-            nn.Linear(input_dim, width),
-            nn.ReLU(),
-            nn.Linear(width, width),
-            nn.ReLU(),
-            nn.Linear(width, out_dim),
-        ),
-        out_dim,
-    )
-
-
 def _set_linear_effective_weight(module: nn.Module, weight: Tensor) -> None:
     if isinstance(module, LowRankLinear):
         module.set_effective_weight(weight)
@@ -749,60 +551,6 @@ def build_mlp_head(
         layers.extend([nn.Linear(hidden_dim, hidden_dim), nn.ReLU()])
     layers.append(nn.Linear(hidden_dim, output_dim))
     return nn.Sequential(*layers)
-
-
-def find_hidden_linear_layers(
-    net: nn.Module,
-    expected_count: int,
-) -> list[nn.Linear]:
-    # These are the target network's Linear layers.  We do NOT alter/factorize
-    # the target networks themselves; only ProbeGen's learned matrices are low rank.
-    linear_layers = [module for module in net.modules() if isinstance(module, nn.Linear)]
-    hidden_layers = linear_layers[:-1]
-
-    if len(hidden_layers) != expected_count:
-        raise RuntimeError(
-            f"Expected {expected_count} hidden Linear layers in the target network, "
-            f"but found {len(hidden_layers)}. Total Linear layers: {len(linear_layers)}."
-        )
-
-    return hidden_layers
-
-
-def run_with_linear_activation_hooks(
-    net: nn.Module,
-    x: Tensor,
-    hidden_layers: Iterable[nn.Linear],
-) -> Tuple[Tensor, list[Tensor]]:
-    """Run net(x) once and capture outputs of the requested hidden Linear layers."""
-    hidden_layers = list(hidden_layers)
-    activations: list[Optional[Tensor]] = [None] * len(hidden_layers)
-    handles = []
-
-    def make_hook(index: int):
-        def hook(_module, _inputs, output):
-            activations[index] = output
-        return hook
-
-    for index, layer in enumerate(hidden_layers):
-        handles.append(layer.register_forward_hook(make_hook(index)))
-
-    try:
-        y = net(x)
-    finally:
-        for handle in handles:
-            handle.remove()
-
-    if any(activation is None for activation in activations):
-        raise RuntimeError("At least one hidden activation was not captured.")
-
-    return y, [a for a in activations if a is not None]
-
-
-def flatten_probe_tokens(tokens: Tensor) -> Tensor:
-    if tokens.ndim != 3:
-        raise ValueError(f"Expected tokens [B, T, D], got {tuple(tokens.shape)}.")
-    return tokens.reshape(tokens.shape[0], -1)
 
 
 # Parse and validate optional target hidden-layer selections.

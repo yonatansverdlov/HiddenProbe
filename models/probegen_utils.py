@@ -523,39 +523,6 @@ def build_per_probe_mlp(
 
 
 
-def build_zero_hidden_correction_projection(
-    *,
-    hidden_dim: int,
-    output_dim: int,
-) -> nn.Linear:
-    """
-    Build a zero-initialized additive correction
-
-        hidden_features -> correction in f(x)-space.
-
-    The CNN token is then:
-
-        f(x) + correction(hidden_features).
-
-    Since the projection is initialized to zero, the model begins with exactly
-    the same token f(x) as the output-only baseline. The f(x) path itself is
-    never projected or modified.
-    """
-    if hidden_dim <= 0 or output_dim <= 0:
-        raise ValueError("hidden_dim and output_dim must be positive.")
-
-    projection = nn.Linear(
-        hidden_dim,
-        output_dim,
-        bias=False,
-    )
-
-    with torch.no_grad():
-        projection.weight.zero_()
-
-    return projection
-
-
 def apply_inductive_per_probe_init(
     *,
     module: Optional[nn.Module],
@@ -667,46 +634,6 @@ def run_with_linear_activation_hooks(
         raise RuntimeError("At least one hidden Linear activation was not captured.")
 
     return y, [a for a in activations if a is not None]
-
-
-def run_with_conv_activation_hooks(
-    net: nn.Module,
-    x: Tensor,
-) -> Tuple[Tensor, list[Tensor]]:
-    """
-    Run net(x) once and capture Conv2d outputs in actual forward-execution order.
-
-    A module reused multiple times contributes one entry for every invocation.
-    """
-    conv_layers = [module for module in net.modules() if isinstance(module, nn.Conv2d)]
-    if not conv_layers:
-        raise RuntimeError(
-            "Conv hidden features require a target network with Conv2d layers."
-        )
-
-    activations: list[Tensor] = []
-    handles = []
-
-    def hook(_module, _inputs, output):
-        if not torch.is_tensor(output):
-            raise RuntimeError("A hooked Conv2d layer returned a non-tensor output.")
-        activations.append(output)
-
-    for layer in conv_layers:
-        handles.append(layer.register_forward_hook(hook))
-
-    try:
-        y = net(x)
-    finally:
-        for handle in handles:
-            handle.remove()
-
-    if not activations:
-        raise RuntimeError(
-            "Conv2d modules were found, but none ran during the target forward pass."
-        )
-
-    return y, activations
 
 
 def flatten_probe_tokens(tokens: Tensor) -> Tensor:

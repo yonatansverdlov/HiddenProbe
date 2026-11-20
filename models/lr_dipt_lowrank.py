@@ -1,9 +1,9 @@
 """Low-rank building blocks for LR-DIPT (Low-Rank Dual-Interaction Probe Transformer).
 
 Every big dense matrix is factorized U@V so the whole readout stays within ~1.05x Kahana's 591,361.
-Reuses the U@V pattern of pat.lowrank.LowRankLinear; adds an optional mid-nonlinearity, zero-init
-up-projection (identity-start residual blocks), masked low-rank attention (Q/K/V: d->r, O: r->d),
-attention pooling, low-rank bilinear, and a Tucker probe pool. No dense d*d projections anywhere.
+Reuses the U@V pattern of pat.lowrank.LowRankLinear for the active CNN readout,
+with optional mid-layer nonlinearities, zero-initialized output projections,
+masked low-rank attention (Q/K/V: d->r, O: r->d), and attention pooling.
 """
 import math
 import torch
@@ -33,18 +33,6 @@ class FactorizedLinear(nn.Module):
         if self.act is not None:
             h = self.act(h)
         return self.up(h)
-
-
-class LowRankResidualBlock(nn.Module):
-    """Pre-norm residual FF with a rank-r bottleneck; up-proj zero-init => starts at identity."""
-    def __init__(self, width, rank, dropout=0.0):
-        super().__init__()
-        self.norm = nn.LayerNorm(width)
-        self.ff = FactorizedLinear(width, width, rank, bias=True, act=nn.GELU(), zero_init_up=True)
-        self.drop = nn.Dropout(dropout)
-
-    def forward(self, x):
-        return x + self.drop(self.ff(self.norm(x)))
 
 
 class LowRankAttention(nn.Module):
@@ -89,32 +77,6 @@ class LowRankAttentionPool(nn.Module):
         lead = x.shape[:-2]
         q = self.seed.expand(*lead, 1, -1)
         return self.attn(q, x, x, key_padding_mask=key_padding_mask).squeeze(-2)
-
-
-class LowRankBilinear(nn.Module):
-    """Low-rank bilinear interaction: (A x) elementwise* (B y), each -> rank. Output dim = rank."""
-    def __init__(self, dx, dy, rank):
-        super().__init__()
-        self.a = nn.Linear(dx, rank, bias=False)
-        self.b = nn.Linear(dy, rank, bias=False)
-
-    def forward(self, x, y):
-        return self.a(x) * self.b(y)                                          # [.., rank]
-
-
-class TuckerPool(nn.Module):
-    """Pool fixed-role tokens [.., P, feat] -> flat [.., r_probe*r_feat] via T = U_p^T @ X @ V_f.
-    Preserves probe-slot identity without a huge P*feat dense layer."""
-    def __init__(self, num_probes, feat, r_probe, r_feat):
-        super().__init__()
-        self.up = nn.Parameter(torch.randn(num_probes, r_probe) * (1.0 / num_probes) ** 0.5)
-        self.vf = nn.Parameter(torch.randn(feat, r_feat) * (1.0 / feat) ** 0.5)
-        self.out_dim = r_probe * r_feat
-
-    def forward(self, x):                                                     # x [.., P, feat]
-        t = torch.einsum("...pf,pr->...rf", x, self.up)                       # [.., r_probe, feat]
-        t = torch.einsum("...rf,fs->...rs", t, self.vf)                       # [.., r_probe, r_feat]
-        return t.flatten(-2)                                                  # [.., r_probe*r_feat]
 
 
 def count_params(module, trainable_only=True):

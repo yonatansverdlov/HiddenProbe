@@ -68,11 +68,7 @@ head; selecting one hidden layer changes the hidden-token count from 64 to
 32 (for `H=32`) while retaining the original layer's embedding ID.
 
 Selected indices are stored in the FMNIST `meta.json` and CIFAR
-`summary.json`. For quick CPU sanity checks:
-
-```bash
-python -m unittest discover -s tests -p test_hidden_layer_selection.py
-```
+`summary.json`.
 
 The existing output-only ProbeGen baseline and full HiddenProbe baseline do
 not need to be re-run for the layer-selection ablation.
